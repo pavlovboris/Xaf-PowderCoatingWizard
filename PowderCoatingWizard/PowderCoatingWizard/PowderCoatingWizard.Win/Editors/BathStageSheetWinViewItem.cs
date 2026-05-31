@@ -71,6 +71,7 @@ namespace PowderCoatingWizard.Win.Editors
         private DateEdit     _deTo;
         private SimpleButton _btnLoad;
         private SimpleButton _btnNewSession;
+        private SimpleButton _btnExport;
 
         // FieldName → pair cell colour (for parameter columns)
         private readonly Dictionary<string, Color> _colColor = [];
@@ -226,6 +227,15 @@ namespace PowderCoatingWizard.Win.Editors
             _btnNewSession.Appearance.Options.UseFont      = true;
             _btnNewSession.Click += OnNewSessionClick;
 
+            _btnExport = new SimpleButton
+            {
+                Text   = "Export to Excel",
+                Width  = 120,
+                Height = 24,
+                Margin = new Padding(16, 0, 0, 0),
+            };
+            _btnExport.Click += (s, e) => ExportToExcel();
+
             // Use a panel with manual positioning for crisp vertical centering
             var toolbar = new Panel
             {
@@ -258,10 +268,11 @@ namespace PowderCoatingWizard.Win.Editors
                 lblTo.Height       = 20; lblTo.Left       = left; CenterV(lblTo,       h); left += lblTo.Width       + lblTo.Margin.Right;
                 _deTo.Height       = 22; _deTo.Left       = left; CenterV(_deTo,       h); left += _deTo.Width       + _deTo.Margin.Right;
                 _btnLoad.Height       = 24; _btnLoad.Left       = left; CenterV(_btnLoad,       h); left += _btnLoad.Width + _btnLoad.Margin.Right + _btnNewSession.Margin.Left;
-                _btnNewSession.Height = 24; _btnNewSession.Left = left; CenterV(_btnNewSession, h);
+                _btnNewSession.Height = 24; _btnNewSession.Left = left; CenterV(_btnNewSession, h); left += _btnNewSession.Width + 8 + _btnExport.Margin.Left;
+                _btnExport.Height     = 24; _btnExport.Left     = left; CenterV(_btnExport,     h);
             };
 
-            toolbar.Controls.AddRange([_chkArchive, lblFrom, _deFrom, lblTo, _deTo, _btnLoad, _btnNewSession]);
+            toolbar.Controls.AddRange([_chkArchive, lblFrom, _deFrom, lblTo, _deTo, _btnLoad, _btnNewSession, _btnExport]);
             // Trigger initial layout by simulating a size event
             toolbar.Size = toolbar.Size;
 
@@ -292,6 +303,51 @@ namespace PowderCoatingWizard.Win.Editors
             _deTo.EditValue      = _dateTo.HasValue ? (object)_dateTo.Value : null;
             LoadData();
             return container;
+        }
+
+        private void ExportToExcel()
+        {
+            if (_gridView == null) return;
+            using var dlg = new SaveFileDialog
+            {
+                Title      = "Export to Excel",
+                Filter     = "Excel Workbook (*.xlsx)|*.xlsx",
+                DefaultExt = "xlsx",
+                FileName   = $"StageSheet_{DateTime.Now:yyyyMMdd_HHmm}.xlsx",
+            };
+            if (dlg.ShowDialog() != DialogResult.OK) return;
+
+            // Temporarily clear display format on numeric parameter columns so Excel
+            // receives a plain number cell (not an unrecognised custom format string).
+            var savedFormats = new Dictionary<GridColumn, (DevExpress.Utils.FormatType ft, string fs)>();
+            foreach (GridColumn col in _gridView.Columns)
+            {
+                if (col.Tag is BathStageColumnMeta meta && col.FieldName == meta.ValueKey && meta.IsNumeric
+                    && !string.IsNullOrEmpty(col.DisplayFormat.FormatString))
+                {
+                    savedFormats[col] = (col.DisplayFormat.FormatType, col.DisplayFormat.FormatString);
+                    col.DisplayFormat.FormatType   = DevExpress.Utils.FormatType.None;
+                    col.DisplayFormat.FormatString = string.Empty;
+                }
+            }
+
+            try
+            {
+                var opts = new DevExpress.XtraPrinting.XlsxExportOptions
+                {
+                    TextExportMode = DevExpress.XtraPrinting.TextExportMode.Value,
+                };
+                _gridView.ExportToXlsx(dlg.FileName, opts);
+            }
+            finally
+            {
+                // Restore display formats
+                foreach (var (col, (ft, fs)) in savedFormats)
+                {
+                    col.DisplayFormat.FormatType   = ft;
+                    col.DisplayFormat.FormatString = fs;
+                }
+            }
         }
 
         /// <summary>Enables/disables date pickers based on selected mode.</summary>
@@ -337,7 +393,8 @@ namespace PowderCoatingWizard.Win.Editors
         {
             if (_gridView == null || _savingLayout || CurrentObject is not LineStage stage) return;
             using var ms = new System.IO.MemoryStream();
-            _gridView.SaveLayoutToStream(ms, DevExpress.Utils.OptionsLayoutBase.FullLayout);
+            var saveOpts = DevExpress.Utils.OptionsLayoutBase.FullLayout;
+            _gridView.SaveLayoutToStream(ms, saveOpts);
             var xml = Convert.ToBase64String(ms.ToArray());
             if (stage.GridLayoutXml == xml) return;
             stage.GridLayoutXml = xml;
@@ -419,8 +476,23 @@ namespace PowderCoatingWizard.Win.Editors
 
                 var valCol = AddColumn(meta.ValueKey, meta.ParameterName, width: 100);
                 valCol.Tag = meta;
+                valCol.OptionsColumn.AllowSort = DevExpress.Utils.DefaultBoolean.False;
 
-                if (meta.IsPredefined)
+                if (meta.IsNumeric)
+                {
+                    var unit = meta.Parameter.Unit?.Symbol;
+                    if (!string.IsNullOrWhiteSpace(unit))
+                    {
+                        valCol.DisplayFormat.FormatType   = DevExpress.Utils.FormatType.Custom;
+                        valCol.DisplayFormat.FormatString = $"{{0:G}} {unit}";
+                    }
+                    else
+                    {
+                        valCol.DisplayFormat.FormatType   = DevExpress.Utils.FormatType.Numeric;
+                        valCol.DisplayFormat.FormatString = "G";
+                    }
+                }
+                else if (meta.IsPredefined)
                 {
                     var repo = new RepositoryItemComboBox { TextEditStyle = DevExpress.XtraEditors.Controls.TextEditStyles.DisableTextEditor };
                     var options = meta.Parameter.PredefinedValues
@@ -537,8 +609,9 @@ namespace PowderCoatingWizard.Win.Editors
         private void ReapplyViewOptions()
         {
             if (_gridView == null) return;
-            _gridView.OptionsView.ColumnHeaderAutoHeight = DevExpress.Utils.DefaultBoolean.True;
-            _gridView.OptionsMenu.ShowConditionalFormattingItem = true;
+            _gridView.OptionsBehavior.Editable                  = true;
+            _gridView.OptionsView.ColumnHeaderAutoHeight         = DevExpress.Utils.DefaultBoolean.True;
+            _gridView.OptionsMenu.ShowConditionalFormattingItem  = true;
 
             foreach (GridColumn col in _gridView.Columns)
             {
@@ -582,18 +655,38 @@ namespace PowderCoatingWizard.Win.Editors
                         de.EditFormat.FormatString    = "dd.MM.yyyy HH:mm";
                     }
                 }
+
+                // Reapply numeric parameter DisplayFormat with unit — FullLayout may clear it
+                if (col.Tag is BathStageColumnMeta metaR && col.FieldName == metaR.ValueKey && metaR.IsNumeric)
+                {
+                    var unit = metaR.Parameter.Unit?.Symbol;
+                    if (!string.IsNullOrWhiteSpace(unit))
+                    {
+                        col.DisplayFormat.FormatType   = DevExpress.Utils.FormatType.Custom;
+                        col.DisplayFormat.FormatString = $"{{0:G}} {unit}";
+                    }
+                    else
+                    {
+                        col.DisplayFormat.FormatType   = DevExpress.Utils.FormatType.Numeric;
+                        col.DisplayFormat.FormatString = "G";
+                    }
+                }
             }
         }
-
-        // ── Custom drawing ───────────────────────────────────────────────────
 
         private void OnCustomColumnDisplayText(
             object sender,
             DevExpress.XtraGrid.Views.Base.CustomColumnDisplayTextEventArgs e)
         {
-            if (e.Column.Tag is not StageCriterion criterion) return;
-            if (e.Value is CriterionCellValue cell)
-                e.DisplayText = cell.Message;
+            // Criterion columns: show message text
+            if (e.Column.Tag is StageCriterion criterion)
+            {
+                if (e.Value is CriterionCellValue cell)
+                    e.DisplayText = cell.Message;
+                return;
+            }
+
+            // Parameter value columns — display format (with unit) is applied via column DisplayFormat
         }
 
         private void OnCustomDrawCell(

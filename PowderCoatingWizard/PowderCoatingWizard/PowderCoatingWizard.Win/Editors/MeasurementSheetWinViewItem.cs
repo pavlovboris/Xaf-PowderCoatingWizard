@@ -70,6 +70,7 @@ namespace PowderCoatingWizard.Win.Editors
         private DateEdit     _deFrom;
         private DateEdit     _deTo;
         private SimpleButton _btnLoad;
+        private SimpleButton _btnExport;
 
         // Maps ValueKey/StatusKey → pair-specific cell colour so OnCustomDrawCell can look it up
         private Dictionary<string, Color> _columnCellColor = [];
@@ -140,6 +141,9 @@ namespace PowderCoatingWizard.Win.Editors
                 LoadData();
             };
 
+            _btnExport = new SimpleButton { Text = "Export to Excel", Width = 120, Height = 24, Margin = new Padding(16, 0, 0, 0) };
+            _btnExport.Click += (s, e) => ExportToExcel();
+
             var toolbar = new Panel
             {
                 Dock      = DockStyle.Top,
@@ -162,9 +166,10 @@ namespace PowderCoatingWizard.Win.Editors
                 _deFrom.Height = 22; _deFrom.Left = left; CenterV(_deFrom, h); left += _deFrom.Width + _deFrom.Margin.Right;
                 lblTo.Height   = 20; lblTo.Left   = left; CenterV(lblTo,   h); left += lblTo.Width   + lblTo.Margin.Right;
                 _deTo.Height   = 22; _deTo.Left   = left; CenterV(_deTo,   h); left += _deTo.Width   + _deTo.Margin.Right;
-                _btnLoad.Height = 24; _btnLoad.Left = left; CenterV(_btnLoad, h);
+                _btnLoad.Height = 24; _btnLoad.Left = left; CenterV(_btnLoad, h); left += _btnLoad.Width + 8;
+                _btnExport.Height = 24; _btnExport.Left = left + _btnExport.Margin.Left; CenterV(_btnExport, h);
             };
-            toolbar.Controls.AddRange([lblFrom, _deFrom, lblTo, _deTo, _btnLoad]);
+            toolbar.Controls.AddRange([lblFrom, _deFrom, lblTo, _deTo, _btnLoad, _btnExport]);
             toolbar.Size = toolbar.Size; // trigger initial layout
 
             // ── Grid ───────────────────────────────────────────────────────
@@ -188,6 +193,7 @@ namespace PowderCoatingWizard.Win.Editors
 
             _gridView.CustomDrawCell         += OnCustomDrawCell;
             _gridView.CustomDrawBandHeader   += OnCustomDrawBandHeader;
+            _gridView.CustomColumnDisplayText += OnCustomColumnDisplayText;
             _gridView.RowUpdated             += OnRowUpdated;
 
             // ── Container ──────────────────────────────────────────────────
@@ -216,6 +222,50 @@ namespace PowderCoatingWizard.Win.Editors
             if (disposing && _os != null)
                 _os.Committed -= OnObjectSpaceCommitted;
             base.Dispose(disposing);
+        }
+
+        private void ExportToExcel()
+        {
+            if (_gridView == null) return;
+            using var dlg = new SaveFileDialog
+            {
+                Title            = "Export to Excel",
+                Filter           = "Excel Workbook (*.xlsx)|*.xlsx",
+                DefaultExt       = "xlsx",
+                FileName         = $"Measurements_{DateTime.Now:yyyyMMdd_HHmm}.xlsx",
+            };
+            if (dlg.ShowDialog() != DialogResult.OK) return;
+
+            // Temporarily clear display format on numeric parameter columns so Excel
+            // receives a plain number cell (not an unrecognised custom format string).
+            var savedFormats = new Dictionary<DevExpress.XtraGrid.Views.BandedGrid.BandedGridColumn, (DevExpress.Utils.FormatType ft, string fs)>();
+            foreach (DevExpress.XtraGrid.Views.BandedGrid.BandedGridColumn col in _gridView.Columns)
+            {
+                if (col.Tag is ColumnMeta meta && col.FieldName == meta.ValueKey && meta.IsNumeric
+                    && !string.IsNullOrEmpty(col.DisplayFormat.FormatString))
+                {
+                    savedFormats[col] = (col.DisplayFormat.FormatType, col.DisplayFormat.FormatString);
+                    col.DisplayFormat.FormatType   = DevExpress.Utils.FormatType.None;
+                    col.DisplayFormat.FormatString = string.Empty;
+                }
+            }
+
+            try
+            {
+                var opts = new DevExpress.XtraPrinting.XlsxExportOptions
+                {
+                    TextExportMode = DevExpress.XtraPrinting.TextExportMode.Value,
+                };
+                _gridView.ExportToXlsx(dlg.FileName, opts);
+            }
+            finally
+            {
+                foreach (var (col, (ft, fs)) in savedFormats)
+                {
+                    col.DisplayFormat.FormatType   = ft;
+                    col.DisplayFormat.FormatString = fs;
+                }
+            }
         }
 
         // ── Layout persistence ──────────────────────────────────────────────
@@ -402,7 +452,8 @@ namespace PowderCoatingWizard.Win.Editors
                         Visible   = true,
                         MinWidth  = 70,
                         Width     = 100,
-                        Tag       = meta
+                        Tag       = meta,
+                        OptionsColumn = { AllowSort = DevExpress.Utils.DefaultBoolean.False }
                     };
                     valCol.AppearanceHeader.TextOptions.WordWrap = DevExpress.Utils.WordWrap.Wrap;
                     valCol.AppearanceHeader.Options.UseTextOptions = true;
@@ -417,6 +468,18 @@ namespace PowderCoatingWizard.Win.Editors
                             repo.MinValue     = decimal.MinValue;
                             repo.MaxValue     = decimal.MaxValue;
                             valCol.ColumnEdit = repo;
+
+                            var unit = meta.Parameter.Unit?.Symbol;
+                            if (!string.IsNullOrWhiteSpace(unit))
+                            {
+                                valCol.DisplayFormat.FormatType   = DevExpress.Utils.FormatType.Custom;
+                                valCol.DisplayFormat.FormatString = $"{{0:G}} {unit}";
+                            }
+                            else
+                            {
+                                valCol.DisplayFormat.FormatType   = DevExpress.Utils.FormatType.Numeric;
+                                valCol.DisplayFormat.FormatString = "G";
+                            }
                             break;
                         }
                         case ParameterValueType.Predefined:
@@ -464,8 +527,8 @@ namespace PowderCoatingWizard.Win.Editors
             RestoreLayout();
 
             // RestoreLayout (FullLayout) overwrites OptionsBehavior/OptionsMenu — restore critical settings.
-            _gridView.OptionsBehavior.Editable                 = true;
-            _gridView.OptionsMenu.ShowConditionalFormattingItem = true;
+            _gridView?.OptionsBehavior.Editable                 = true;
+            _gridView?.OptionsMenu.ShowConditionalFormattingItem = true;
 
             // ── Step 6: re-tag columns – FullLayout restore creates new column
             //           objects that lose their Tag and AppearanceCell settings.
@@ -506,6 +569,22 @@ namespace PowderCoatingWizard.Win.Editors
                 // FullLayout restore wipes AppearanceHeader — reapply word-wrap on every column.
                 col.AppearanceHeader.TextOptions.WordWrap   = DevExpress.Utils.WordWrap.Wrap;
                 col.AppearanceHeader.Options.UseTextOptions = true;
+
+                // Reapply numeric DisplayFormat with unit — FullLayout may clear it.
+                if (col.Tag is ColumnMeta metaR && col.FieldName == metaR.ValueKey && metaR.IsNumeric)
+                {
+                    var unit = metaR.Parameter?.Unit?.Symbol;
+                    if (!string.IsNullOrWhiteSpace(unit))
+                    {
+                        col.DisplayFormat.FormatType   = DevExpress.Utils.FormatType.Custom;
+                        col.DisplayFormat.FormatString = $"{{0:G}} {unit}";
+                    }
+                    else
+                    {
+                        col.DisplayFormat.FormatType   = DevExpress.Utils.FormatType.Numeric;
+                        col.DisplayFormat.FormatString = "G";
+                    }
+                }
             }
         }
 
@@ -517,6 +596,13 @@ namespace PowderCoatingWizard.Win.Editors
         {
             // Band already has AppearanceHeader set; just let DevExpress draw it.
             // Override here only if you need extra painting.
+        }
+
+        private void OnCustomColumnDisplayText(
+            object sender,
+            DevExpress.XtraGrid.Views.Base.CustomColumnDisplayTextEventArgs e)
+        {
+            // Parameter value columns — unit is shown via DisplayFormat on the column
         }
 
         private void OnCustomDrawCell(

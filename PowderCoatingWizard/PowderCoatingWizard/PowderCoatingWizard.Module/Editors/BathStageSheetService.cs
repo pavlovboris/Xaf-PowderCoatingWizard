@@ -162,17 +162,18 @@ namespace PowderCoatingWizard.Module.Editors
 
                     if (m.NumericValue.HasValue)
                     {
-                        row[meta.ValueKey]  = $"{m.NumericValue} {m.Parameter.Unit?.Symbol}";
+                        row[meta.ValueKey]  = m.NumericValue.Value;
                         row[meta.StatusKey] = m.EvaluatedStatus;
                     }
-                    else if (m.SelectedValue != null)
+                    else if (!meta.IsNumeric && m.SelectedValue != null)
                     {
                         row[meta.ValueKey]  = m.SelectedValue.Name;
                         row[meta.StatusKey] = BathParameter.EvaluateStatus(m.SelectedValue);
                     }
-                    else
+                    else if (!meta.IsNumeric)
                     {
                         row[meta.ValueKey] = m.TextValue ?? string.Empty;
+                        row[meta.StatusKey] = m.EvaluatedStatus;
                     }
                 }
 
@@ -229,15 +230,15 @@ namespace PowderCoatingWizard.Module.Editors
 
                     for (int i = 0; i < sessions.Count; i++)
                     {
-                        var row     = table.Rows[i];
-                        var rowRes  = batchResults[i];
+                        var tableRow = table.Rows[i];
+                        var rowRes   = batchResults[i];
 
                         foreach (var outMap in outMaps)
                         {
                             var colKey = ExcelOutputColKey(tmpl, outMap);
                             if (!table.Columns.Contains(colKey)) continue;
                             var match = rowRes.FirstOrDefault(r => r.ColumnName == outMap.ColumnName);
-                            row[colKey] = match.ColumnName != null ? match.Value : string.Empty;
+                            tableRow[colKey] = match.ColumnName != null ? match.Value : string.Empty;
                         }
                     }
                 }
@@ -275,7 +276,7 @@ namespace PowderCoatingWizard.Module.Editors
 
             foreach (var meta in columnMetas)
             {
-                table.Columns.Add(meta.ValueKey,  typeof(string));
+                table.Columns.Add(meta.ValueKey,  meta.IsNumeric ? typeof(double) : typeof(string));
                 table.Columns.Add(meta.StatusKey, typeof(ParameterStatus));
             }
 
@@ -426,8 +427,21 @@ namespace PowderCoatingWizard.Module.Editors
 
             foreach (var meta in columnMetas)
             {
-                if (cellsByKey.TryGetValue(meta.ValueKey, out var vc) && vc.TextValue != null)
+                if (!cellsByKey.TryGetValue(meta.ValueKey, out var vc) || string.IsNullOrEmpty(vc.TextValue)) continue;
+
+                if (meta.IsNumeric)
+                {
+                    if (double.TryParse(vc.TextValue,
+                            System.Globalization.NumberStyles.Any,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var numVal))
+                        row[meta.ValueKey] = numVal;
+                    // else: no valid number — leave cell as DBNull
+                }
+                else
+                {
                     row[meta.ValueKey] = vc.TextValue;
+                }
                 if (cellsByKey.TryGetValue(meta.StatusKey, out var sc))
                 {
                     ParameterStatus ps;
@@ -507,15 +521,15 @@ namespace PowderCoatingWizard.Module.Editors
                     if (!measByParam.TryGetValue(meta.ParameterOid, out var m)) continue;
                     if (m.NumericValue.HasValue)
                     {
-                        row[meta.ValueKey]  = $"{m.NumericValue} {m.Parameter.Unit?.Symbol}";
+                        row[meta.ValueKey]  = m.NumericValue.Value;
                         row[meta.StatusKey] = m.EvaluatedStatus;
                     }
-                    else if (m.SelectedValue != null)
+                    else if (!meta.IsNumeric && m.SelectedValue != null)
                     {
                         row[meta.ValueKey]  = m.SelectedValue.Name;
                         row[meta.StatusKey] = BathParameter.EvaluateStatus(m.SelectedValue);
                     }
-                    else
+                    else if (!meta.IsNumeric)
                     {
                         row[meta.ValueKey] = m.TextValue ?? string.Empty;
                     }
@@ -639,6 +653,7 @@ namespace PowderCoatingWizard.Module.Editors
         public string        ParameterName  { get; }
         public BathParameter Parameter      { get; }
         public bool          IsPredefined   => Parameter.ValueType == ParameterValueType.Predefined;
+        public bool          IsNumeric      => Parameter.ValueType == ParameterValueType.Numeric;
 
         public string ValueKey  => $"V__{ParameterOid}";
         public string StatusKey => $"S__{ParameterOid}";

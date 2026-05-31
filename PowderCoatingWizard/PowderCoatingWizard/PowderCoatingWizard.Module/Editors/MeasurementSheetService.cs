@@ -78,7 +78,7 @@ namespace PowderCoatingWizard.Module.Editors
             // Add value + status column pair for each combination
             foreach (var meta in columnMetas)
             {
-                table.Columns.Add(meta.ValueKey,  typeof(string));
+                table.Columns.Add(meta.ValueKey,  meta.IsNumeric ? typeof(double) : typeof(string));
                 table.Columns.Add(meta.StatusKey, typeof(ParameterStatus));
             }
 
@@ -114,15 +114,15 @@ namespace PowderCoatingWizard.Module.Editors
 
                     if (measurement.NumericValue.HasValue)
                     {
-                        row[meta.ValueKey]  = $"{measurement.NumericValue} {measurement.Parameter.Unit?.Symbol}";
+                        row[meta.ValueKey]  = measurement.NumericValue.Value;
                         row[meta.StatusKey] = measurement.EvaluatedStatus;
                     }
-                    else if (measurement.SelectedValue != null)
+                    else if (!meta.IsNumeric && measurement.SelectedValue != null)
                     {
                         row[meta.ValueKey]  = measurement.SelectedValue.Name;
                         row[meta.StatusKey] = BathParameter.EvaluateStatus(measurement.SelectedValue);
                     }
-                    else
+                    else if (!meta.IsNumeric)
                     {
                         row[meta.ValueKey]  = measurement.TextValue ?? string.Empty;
                         row[meta.StatusKey] = ParameterStatus.OK;
@@ -145,6 +145,7 @@ namespace PowderCoatingWizard.Module.Editors
         public string        Key             { get; }
         public BathParameter Parameter       { get; }
         public bool          IsPredefined    => Parameter?.ValueType == ParameterValueType.Predefined;
+        public bool          IsNumeric       => Parameter?.ValueType == ParameterValueType.Numeric;
 
         /// <summary>DataTable column name for the display value.</summary>
         public string ValueKey  => $"V__{Key}";

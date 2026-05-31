@@ -11,8 +11,8 @@ using PowderCoatingWizard.Win.Forms;
 namespace PowderCoatingWizard.Win.Controllers
 {
     /// <summary>
-    /// Adds an "AI Assistant" toolbar action on LineStage detail/list views.
-    /// As a ViewController it always has a valid View and CurrentObject context.
+    /// Adds an "AI Assistant" toolbar action available in all views.
+    /// Stage context is used when available but is not required.
     /// </summary>
     public class AIAssistantController : ViewController
     {
@@ -20,8 +20,7 @@ namespace PowderCoatingWizard.Win.Controllers
 
         public AIAssistantController()
         {
-            TargetObjectType = typeof(LineStage);
-
+            // No TargetObjectType restriction — action is visible in every view
             _openAction = new SimpleAction(this, "OpenAIAssistant", PredefinedCategory.Tools)
             {
                 Caption = "AI Assistant",
@@ -42,6 +41,7 @@ namespace PowderCoatingWizard.Win.Controllers
             var chatClient = AISettingsService.BuildChatClient(settings);
             var embGen = AISettingsService.BuildEmbeddingGenerator(settings);
 
+            // Stage context is optional — pick it from the current view if available
             LineStage? currentStage = View switch
             {
                 DetailView dv => dv.CurrentObject as LineStage,

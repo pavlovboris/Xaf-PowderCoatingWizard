@@ -137,6 +137,13 @@ namespace PowderCoatingWizard.Module.Editors
                 return (ps.ToString(), (int)ps);   // OK=0, Warning=1, Alarm=2
 
             // Numeric or text value column
+            if (raw is double d)
+                return (d.ToString(System.Globalization.CultureInfo.InvariantCulture), null);
+            if (raw is float f)
+                return (f.ToString(System.Globalization.CultureInfo.InvariantCulture), null);
+            if (raw is decimal dec)
+                return (dec.ToString(System.Globalization.CultureInfo.InvariantCulture), null);
+
             return (raw.ToString() ?? string.Empty, null);
         }
     }
