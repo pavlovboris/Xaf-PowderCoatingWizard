@@ -1,0 +1,47 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Application Title="PowderCoatingWizard">
+  <BOModel>
+    <Class Name="DevExpress.Persistent.BaseImpl.PermissionPolicy.PermissionPolicyUser" Caption="Base User" />
+  </BOModel>
+  <CreatableItems>
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.AnalysisCriterion" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.AnalysisCriterionThreshold" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.AnalysisRecord" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.AnalysisType" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.ArchiveRebuildParams" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.BathParameter" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.ChemicalProduct" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.CriterionResult" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.LineCertification" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.LineStage" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.MeasurementSession" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.ParameterCategory" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.ParameterMeasurement" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.ParameterThreshold" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.ParameterUnit" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.PredefinedParameterValue" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.ProductionLine" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.StageCalculatedField" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.StageChemical" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.StageCriterion" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.StageCriterionBranch" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.StageCriterionCondition" Removed="True" />
+    <CreatableItem ClassName="PowderCoatingWizard.Module.BusinessObjects.StageParameter" Removed="True" />
+  </CreatableItems>
+  <Options>
+    <LayoutManagerOptions RequiredFieldMark="*" />
+  </Options>
+  <SchemaModules>
+    <SchemaModule Name="CloneObjectModule" Version="26.1.2.0" IsNewNode="True" />
+    <SchemaModule Name="SchedulerModuleBase" Version="26.1.2.0" IsNewNode="True" />
+    <SchemaModule Name="SystemModule" Version="26.1.2.0" IsNewNode="True" />
+  </SchemaModules>
+  <Views>
+    <ListView Id="ApplicationUser_ListView" Caption="Users" />
+    <DetailView Id="MeasurementSession_DetailView">
+      <Items>
+        <PropertyEditor Id="MeasuredOn" EditMask="g" DisplayFormat="{0:g}" />
+      </Items>
+    </DetailView>
+  </Views>
+</Application>

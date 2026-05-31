@@ -1,0 +1,344 @@
+@namespace PowderCoatingWizard.Blazor.Server.Editors
+@using DevExpress.Blazor
+@using PowderCoatingWizard.Module.BusinessObjects
+@using PowderCoatingWizard.Module.Editors
+@using System.Data
+
+@* ── Toolbar: mode + date filter ─────────────────────────────────── *@
+<div class="bss-toolbar d-flex align-items-center gap-3 p-2 border-bottom">
+    <DxCheckBox Checked="_useArchive"
+                CheckedChanged="@((bool v) => { _useArchive = v; })"
+                LabelText="@(_useArchive ? "📦 Archive" : "⚡ Live")" />
+
+    @if (!_useArchive)
+    {
+        <span class="text-muted small">Date from:</span>
+        <DxDateEdit @bind-Date="_dateFrom" DisplayFormat="dd.MM.yyyy" CssClass="bss-date" />
+        <span class="text-muted small">to:</span>
+        <DxDateEdit @bind-Date="_dateTo"   DisplayFormat="dd.MM.yyyy" CssClass="bss-date" />
+        <DxButton Text="Load" Click="@OnLoadClick" RenderStyle="ButtonRenderStyle.Primary" />
+    }
+    else
+    {
+        <span class="text-muted small">Archive from:</span>
+        <DxDateEdit @bind-Date="_dateFrom" DisplayFormat="dd.MM.yyyy" CssClass="bss-date" />
+        <span class="text-muted small">to:</span>
+        <DxDateEdit @bind-Date="_dateTo"   DisplayFormat="dd.MM.yyyy" CssClass="bss-date" />
+        <DxButton Text="Load" Click="@OnLoadClick" RenderStyle="ButtonRenderStyle.Primary" />
+        @if (LatestArchivedOn.HasValue)
+        {
+            <span class="bss-archived-on text-muted small">Archived: @LatestArchivedOn.Value.ToString("dd.MM.yyyy HH:mm")</span>
+        }
+    }
+
+    <span class="ms-auto"></span>
+    <DxButton Text="＋ New Session"
+              Click="@OnAddNewSessionClick"
+              RenderStyle="ButtonRenderStyle.Success"
+              Enabled="@(OnNewSession != null)" />
+</div>
+
+@if (SheetData == null || ((Columns == null || Columns.Count == 0) && (Criteria == null || Criteria.Count == 0)))
+{
+    <div class="alert alert-info m-3">No measurements recorded for this stage yet.</div>
+}
+else
+{
+    <DxGrid @key="@_gridKey"
+            @ref="_grid"
+            Data="@SheetData"
+            ShowGroupPanel="false"
+            PageSize="50"
+            CssClass="bath-stage-sheet"
+            ColumnResizeMode="GridColumnResizeMode.NextColumn"
+            FilterMenuButtonDisplayMode="GridFilterMenuButtonDisplayMode.Always"
+            ContextMenus="GridContextMenus.Header"
+            EditMode="GridEditMode.EditRow"
+            EditModelSaving="OnEditModelSaving"
+            LayoutAutoSaving="OnLayoutAutoSaving"
+            LayoutAutoLoading="OnLayoutAutoLoading">
+
+        <Columns>
+            <DxGridDataColumn FieldName="@BathStageSheetService.ColDate"
+                              Caption="Date"
+                              DisplayFormat="dd.MM.yyyy HH:mm"
+                              Width="150px">
+                <CellEditTemplate>
+                    @{
+                        var drv = context.EditModel as System.Data.DataRowView;
+                        var dtVal = drv?[BathStageSheetService.ColDate] is DateTime dt ? dt : DateTime.Now;
+                    }
+                    <DxDateEdit Date="@dtVal"
+                                DateChanged="@((DateTime v) => { if (drv != null) drv[BathStageSheetService.ColDate] = v; })"
+                                DisplayFormat="dd.MM.yyyy HH:mm"
+                                TimeSectionVisible="true"
+                                style="width:100%" />
+                </CellEditTemplate>
+            </DxGridDataColumn>
+
+            <DxGridDataColumn FieldName="@BathStageSheetService.ColOperator"
+                              Caption="Operator"
+                              Width="110px">
+                <CellEditTemplate>
+                    @{
+                        var drv = context.EditModel as System.Data.DataRowView;
+                        string opVal = drv?[BathStageSheetService.ColOperator]?.ToString() ?? string.Empty;
+                    }
+                    <DxTextBox Value="@opVal"
+                               ValueChanged="@((string v) => { if (drv != null) drv[BathStageSheetService.ColOperator] = v; })"
+                               style="width:100%" />
+                </CellEditTemplate>
+            </DxGridDataColumn>
+
+            <DxGridDataColumn FieldName="@BathStageSheetService.ColNotes"
+                              Caption="Notes"
+                              Width="200px">
+                <CellEditTemplate>
+                    @{
+                        var drv = context.EditModel as System.Data.DataRowView;
+                        string notesVal = drv?[BathStageSheetService.ColNotes]?.ToString() ?? string.Empty;
+                    }
+                    <DxMemo Value="@notesVal"
+                            ValueChanged="@((string v) => { if (drv != null) drv[BathStageSheetService.ColNotes] = v; })"
+                            Rows="2"
+                            style="width:100%" />
+                </CellEditTemplate>
+            </DxGridDataColumn>
+
+            @* ── Parameter value + status column pairs ── *@
+            @for (int i = 0; i < (_columns?.Count ?? 0); i++)
+            {
+                var meta    = _columns![i];
+                string vKey = meta.ValueKey;
+                string sKey = meta.StatusKey;
+
+                <DxGridDataColumn @key="@vKey"
+                                  FieldName="@vKey"
+                                  Caption="@meta.ParameterName"
+                                  MinWidth="80">
+                    <CellDisplayTemplate>
+                        @{
+                            var status = GetParamStatus(context.DataItem, sKey);
+                            var css = status switch
+                            {
+                                ParameterStatus.Alarm   => "bss-cell-alarm",
+                                ParameterStatus.Warning => "bss-cell-warning",
+                                _                       => string.Empty
+                            };
+                        }
+                        <span class="@css">@context.DisplayText</span>
+                    </CellDisplayTemplate>
+                    <CellEditTemplate>
+                        @{
+                            var editDrv = context.EditModel as System.Data.DataRowView;
+                            var editVal = editDrv?[vKey]?.ToString() ?? string.Empty;
+                        }
+                        @if (meta.IsPredefined)
+                        {
+                            var opts = meta.Parameter.PredefinedValues
+                                .OrderBy(v => v.SortOrder).ThenBy(v => v.Name)
+                                .Select(v => v.Name).ToList();
+                            <DxComboBox Data="@opts"
+                                        Value="@editVal"
+                                        ValueChanged="@((string v) => { if (editDrv != null) editDrv[vKey] = v; })"
+                                        ClearButtonDisplayMode="DataEditorClearButtonDisplayMode.Never" />
+                        }
+                        else
+                        {
+                            <DxTextBox Value="@editVal"
+                                       ValueChanged="@((string v) => { if (editDrv != null) editDrv[vKey] = v; })" />
+                        }
+                    </CellEditTemplate>
+                </DxGridDataColumn>
+
+                <DxGridDataColumn @key="@sKey"
+                                  FieldName="@sKey"
+                                  Caption="@($"● {meta.ParameterName}")"
+                                  MinWidth="70">
+                    <CellDisplayTemplate>
+                        @{
+                            var st = GetParamStatus(context.DataItem, sKey);
+                            var stCss = st switch
+                            {
+                                ParameterStatus.Alarm   => "bss-cell-alarm",
+                                ParameterStatus.Warning => "bss-cell-warning",
+                                _                       => string.Empty
+                            };
+                            var label = st switch
+                            {
+                                ParameterStatus.Alarm   => "⛔ ALARM",
+                                ParameterStatus.Warning => "⚠ WARN",
+                                ParameterStatus.OK      => "✔ OK",
+                                _                       => "–"
+                            };
+                        }
+                        <span class="@stCss">@label</span>
+                    </CellDisplayTemplate>
+                </DxGridDataColumn>
+            }
+
+            @* ── Criterion result columns ── *@
+            @foreach (var criterion in (_criteria ?? []))
+            {
+                var colKey = BathStageSheetService.CriterionColKey(criterion);
+                var cap    = criterion.Name;
+
+                <DxGridDataColumn @key="@colKey"
+                                  FieldName="@colKey"
+                                  Caption="@cap"
+                                  MinWidth="120">
+                    <CellDisplayTemplate>
+                        @{
+                            var cell = context.DataItem is DataRowView drv
+                                && SheetData!.Columns.Contains(colKey)
+                                ? drv[colKey] as CriterionCellValue
+                                : null;
+                            var cellCss = cell?.Status switch
+                            {
+                                ParameterStatus.Alarm   => "bss-cell-alarm",
+                                ParameterStatus.Warning => "bss-cell-warning",
+                                _                       => string.Empty
+                            };
+                        }
+                        <span class="@cellCss">@(cell?.Message ?? "–")</span>
+                    </CellDisplayTemplate>
+                </DxGridDataColumn>
+            }
+        </Columns>
+
+    </DxGrid>
+}
+
+<style>
+    .bss-cell-alarm   { background:#ffd6d6 !important; color:#b00020; font-weight:600; padding:2px 6px; border-radius:3px; display:inline-block; }
+    .bss-cell-warning { background:#fff3cd !important; color:#7a5c00; font-weight:600; padding:2px 6px; border-radius:3px; display:inline-block; }
+
+    .bss-toolbar { background:#f8f9fa; flex-wrap:wrap; }
+    .bss-date    { width:120px; }
+    .bss-archived-on { font-style:italic; }
+
+    .bath-stage-sheet .dxbl-grid-header-cell .dxbl-text {
+        white-space: normal;
+        word-break: break-word;
+        line-height: 1.3;
+    }
+</style>
+
+@code {
+    [Parameter] public DataTable               SheetData { get; set; }
+    [Parameter] public List<BathStageColumnMeta> Columns { get; set; }
+    [Parameter] public List<StageCriterion>    Criteria  { get; set; }
+    [Parameter] public string                  BlazorLayoutJson { get; set; }
+    [Parameter] public Action<string>          OnLayoutSaved    { get; set; }
+    [Parameter] public Action<DataRowView>     OnRowSave        { get; set; }
+    [Parameter] public bool                    UseArchive       { get; set; }
+    [Parameter] public DateTime?               DateFrom         { get; set; }
+    [Parameter] public DateTime?               DateTo           { get; set; }
+    [Parameter] public DateTime?               LatestArchivedOn { get; set; }
+    [Parameter] public Action<bool, DateTime?, DateTime?> OnFilterChanged { get; set; }
+    [Parameter] public Func<Guid>                         OnNewSession    { get; set; }
+
+    DxGrid _grid;
+    int    _gridKey = 0;
+
+    List<BathStageColumnMeta> _columns;
+    List<StageCriterion>      _criteria;
+
+    bool      _useArchive;
+    DateTime? _dateFrom;
+    DateTime? _dateTo;
+
+    protected override void OnParametersSet()
+    {
+        base.OnParametersSet();
+
+        // Sync external state into local toolbar state
+        _useArchive = UseArchive;
+        _dateFrom   = DateFrom;
+        _dateTo     = DateTo;
+
+        // Force grid re-create when column structure changes
+        var newKey = BuildStructureKey();
+        var oldKey = BuildStructureKey(_columns, _criteria);
+        if (newKey != oldKey) _gridKey++;
+
+        _columns  = Columns;
+        _criteria = Criteria;
+    }
+
+    string BuildStructureKey(
+        List<BathStageColumnMeta>? cols = null,
+        List<StageCriterion>?      crit = null)
+    {
+        cols ??= Columns;
+        crit ??= Criteria;
+        var colPart  = string.Join(",", cols?.Select(c => c.ValueKey) ?? []);
+        var critPart = string.Join(",", crit?.Select(c => c.Oid.ToString()) ?? []);
+        return $"{colPart}|{critPart}";
+    }
+
+    ParameterStatus GetParamStatus(object dataItem, string statusKey)
+    {
+        if (dataItem is not DataRowView drv) return ParameterStatus.OK;
+        if (SheetData == null || !SheetData.Columns.Contains(statusKey)) return ParameterStatus.OK;
+        return drv[statusKey] as ParameterStatus? ?? ParameterStatus.OK;
+    }
+
+    void OnLoadClick()
+    {
+        OnFilterChanged?.Invoke(_useArchive, _dateFrom, _dateTo);
+    }
+
+    async Task OnAddNewSessionClick()
+    {
+        if (OnNewSession == null) return;
+        var newOid = OnNewSession.Invoke();
+        if (newOid == Guid.Empty || _grid == null || SheetData == null) return;
+
+        // Find the row index of the newly appended row and start editing it
+        await Task.Yield(); // let Blazor render the new DataTable row first
+        var rowIndex = -1;
+        for (int i = 0; i < SheetData.Rows.Count; i++)
+        {
+            if (SheetData.Rows[i][BathStageSheetService.ColOid] is Guid g && g == newOid)
+            {
+                rowIndex = i;
+                break;
+            }
+        }
+        if (rowIndex >= 0)
+            await _grid.StartEditDataItemAsync(SheetData.DefaultView[rowIndex]);
+    }
+
+    async Task OnLayoutAutoSaving(GridPersistentLayoutEventArgs e)
+    {
+        if (_applyingLayout) return;
+        var json = System.Text.Json.JsonSerializer.Serialize(e.Layout);
+        OnLayoutSaved?.Invoke(json);
+        await Task.CompletedTask;
+    }
+
+    async Task OnEditModelSaving(GridEditModelSavingEventArgs e)
+    {
+        if (e.EditModel is System.Data.DataRowView drv)
+            OnRowSave?.Invoke(drv);
+        await Task.CompletedTask;
+    }
+
+    bool _applyingLayout;
+
+    async Task OnLayoutAutoLoading(GridPersistentLayoutEventArgs e)
+    {
+        if (!string.IsNullOrEmpty(BlazorLayoutJson))
+        {
+            try
+            {
+                _applyingLayout = true;
+                e.Layout = System.Text.Json.JsonSerializer.Deserialize<GridPersistentLayout>(BlazorLayoutJson);
+            }
+            catch { /* stale */ }
+            finally { _applyingLayout = false; }
+        }
+        await Task.CompletedTask;
+    }
+}

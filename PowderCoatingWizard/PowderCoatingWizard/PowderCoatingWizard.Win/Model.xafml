@@ -1,0 +1,128 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Application Logo="ExpressAppLogo">
+  <NavigationItems NavigationStyle="NavBar" DefaultChildItemsDisplayStyle="LargeIcons" RootGroupsStyle="Standard" />
+  <Options UIType="TabbedMDI" FormStyle="Ribbon" EnableHtmlFormatting="True" Palette="" />
+  <SchemaModules>
+    <SchemaModule Name="CloneObjectModule" Version="26.1.2.0" IsNewNode="True" />
+    <SchemaModule Name="SchedulerModuleBase" Version="26.1.2.0" IsNewNode="True" />
+    <SchemaModule Name="SchedulerWindowsFormsModule" Version="26.1.2.0" IsNewNode="True" />
+    <SchemaModule Name="SystemModule" Version="26.1.2.0" IsNewNode="True" />
+    <SchemaModule Name="SystemWindowsFormsModule" Version="26.1.2.0" IsNewNode="True" />
+  </SchemaModules>
+  <Views>
+    <ListView Id="LineStage_Criteria_ListView">
+      <Columns>
+        <ColumnInfo Id="SortOrder" Width="144" />
+        <ColumnInfo Id="DefaultStatus" Width="95" />
+      </Columns>
+    </ListView>
+    <DetailView Id="LineStage_DetailView">
+      <Items>
+        <BathStageSheetItemWin Id="MeasuresStage" IsNewNode="True" />
+      </Items>
+      <Layout>
+        <LayoutGroup Id="Main" RelativeSize="100">
+          <LayoutGroup Id="SimpleEditors" RelativeSize="100">
+            <TabbedGroup Id="Item1" CaptionLocation="Top" Index="0" RelativeSize="100" IsNewNode="True">
+              <LayoutGroup Id="LineStage" ShowCaption="True" Caption="Line Stage" Direction="Vertical" Index="0" RelativeSize="100" IsNewNode="True">
+                <LayoutGroup Id="Auto2f346c1f-84e1-4bb0-bc6d-ba61d8da539f" ShowCaption="False" Caption="Auto2f346c1f-84e1-4bb0-bc6d-ba61d8da539f(5)" Direction="Horizontal" Index="0" RelativeSize="25.107296137339056" IsNewNode="True">
+                  <LayoutGroup Id="LineStage_col1" ShowCaption="False" Index="0" RelativeSize="50" IsNewNode="True">
+                    <LayoutItem Id="Position" ViewItem="Position" Index="0" RelativeSize="37.60683760683761" IsNewNode="True" />
+                    <LayoutItem Id="Name" ViewItem="Name" Index="1" RelativeSize="27.35042735042735" IsNewNode="True" />
+                    <LayoutItem Id="StageFunction" ViewItem="StageFunction" Index="2" RelativeSize="35.042735042735046" IsNewNode="True" />
+                  </LayoutGroup>
+                  <LayoutGroup Id="LineStage_col2" ShowCaption="False" Index="1" RelativeSize="50" IsNewNode="True">
+                    <LayoutItem Id="ChemistryType" ViewItem="ChemistryType" Index="0" RelativeSize="37.60683760683761" IsNewNode="True" />
+                    <LayoutItem Id="IsActive" ViewItem="IsActive" Index="1" RelativeSize="24.786324786324787" IsNewNode="True" />
+                    <LayoutItem Id="DisplayName" ViewItem="DisplayName" Index="2" RelativeSize="37.60683760683761" IsNewNode="True" />
+                  </LayoutGroup>
+                </LayoutGroup>
+                <LayoutItem Id="Description" ViewItem="Description" Index="1" RelativeSize="28.540772532188843" IsNewNode="True" />
+                <TabbedGroup Id="Tabs" Index="2" RelativeSize="46.351931330472105" IsNewNode="True">
+                  <LayoutGroup Id="Chemicals" ShowCaption="True" TextAlignMode="AlignWithChildren" Index="0" RelativeSize="100" IsNewNode="True">
+                    <LayoutItem Id="Chemicals" TextAlignMode="AutoSize" ViewItem="Chemicals" Index="0" RelativeSize="100" IsNewNode="True" />
+                  </LayoutGroup>
+                  <LayoutGroup Id="Parameters" ShowCaption="True" TextAlignMode="AlignWithChildren" Index="1" RelativeSize="100" IsNewNode="True">
+                    <LayoutItem Id="Parameters" TextAlignMode="AutoSize" ViewItem="Parameters" Index="0" RelativeSize="100" IsNewNode="True" />
+                  </LayoutGroup>
+                  <LayoutGroup Id="Criteria" ShowCaption="True" TextAlignMode="AlignWithChildren" Index="2" RelativeSize="100" IsNewNode="True">
+                    <LayoutItem Id="Criteria" TextAlignMode="AutoSize" ViewItem="Criteria" Index="0" RelativeSize="100" IsNewNode="True" />
+                  </LayoutGroup>
+                </TabbedGroup>
+              </LayoutGroup>
+              <LayoutGroup Id="Item2" ShowCaption="True" CaptionLocation="Top" Direction="Vertical" Index="1" TextAlignMode="AlignWithChildren" RelativeSize="100" Caption="Item2" IsNewNode="True">
+                <LayoutItem Id="Measures" ViewItem="Measures" Index="0" RelativeSize="100" IsNewNode="True" />
+              </LayoutGroup>
+            </TabbedGroup>
+            <LayoutGroup Id="LineStage" Removed="True" />
+          </LayoutGroup>
+          <TabbedGroup Id="Tabs" RelativeSize="47.091932457786115" Index="1" Removed="True">
+            <LayoutGroup Id="Chemicals" TextAlignMode="AlignWithChildren" RelativeSize="100">
+              <LayoutItem Id="Chemicals" TextAlignMode="AutoSize" RelativeSize="100" />
+            </LayoutGroup>
+            <LayoutGroup Id="Criteria" TextAlignMode="AlignWithChildren" RelativeSize="100">
+              <LayoutItem Id="Criteria" TextAlignMode="AutoSize" RelativeSize="100" />
+            </LayoutGroup>
+            <LayoutGroup Id="Parameters" TextAlignMode="AlignWithChildren" RelativeSize="100">
+              <LayoutItem Id="Parameters" TextAlignMode="AutoSize" RelativeSize="100" />
+            </LayoutGroup>
+          </TabbedGroup>
+          <LayoutGroup Id="SizeableEditors" RelativeSize="6.566604127579738" Caption="Description" Removed="True">
+            <LayoutItem Id="Description" RelativeSize="100" Removed="True" />
+          </LayoutGroup>
+        </LayoutGroup>
+      </Layout>
+    </DetailView>
+    <DetailView Id="ProductionLine_DetailView">
+      <Items>
+        <MeasurementSheetItemWin Id="Measurements" IsNewNode="True" />
+      </Items>
+      <Layout>
+        <LayoutGroup Id="Main" RelativeSize="100">
+          <LayoutGroup Id="SimpleEditors" RelativeSize="100">
+            <TabbedGroup Id="Item1" CaptionLocation="Top" Index="0" RelativeSize="100" IsNewNode="True">
+              <LayoutGroup Id="ProductionLine" ShowCaption="True" Caption="Production Line" Direction="Vertical" Index="0" RelativeSize="100" IsNewNode="True">
+                <LayoutGroup Id="Auto858554c6-7baf-47b4-a65e-502f8523a803" ShowCaption="False" Caption="Auto858554c6-7baf-47b4-a65e-502f8523a803(5)" Direction="Horizontal" Index="0" RelativeSize="14.147521160822249" IsNewNode="True">
+                  <LayoutGroup Id="ProductionLine_col1" ShowCaption="False" Index="0" RelativeSize="49.811794228356334" IsNewNode="True">
+                    <LayoutItem Id="Name" ViewItem="Name" Index="0" RelativeSize="37.60683760683761" IsNewNode="True" />
+                    <LayoutItem Id="Location" ViewItem="Location" Index="1" RelativeSize="27.35042735042735" IsNewNode="True" />
+                    <LayoutItem Id="Orientation" ViewItem="Orientation" Index="2" RelativeSize="35.042735042735046" IsNewNode="True" />
+                  </LayoutGroup>
+                  <LayoutGroup Id="ProductionLine_col2" ShowCaption="False" Index="1" RelativeSize="50.188205771643666" IsNewNode="True">
+                    <LayoutItem Id="PretreatmentMethod" ViewItem="PretreatmentMethod" Index="0" RelativeSize="37.60683760683761" IsNewNode="True" />
+                    <LayoutItem Id="NumberOfStages" ViewItem="NumberOfStages" Index="1" RelativeSize="27.35042735042735" IsNewNode="True" />
+                    <LayoutItem Id="IsActive" ViewItem="IsActive" Index="2" RelativeSize="35.042735042735046" IsNewNode="True" />
+                  </LayoutGroup>
+                </LayoutGroup>
+                <LayoutItem Id="Description" ViewItem="Description" Index="1" RelativeSize="59.73397823458283" IsNewNode="True" />
+                <TabbedGroup Id="Tabs" Index="2" RelativeSize="26.11850060459492" IsNewNode="True">
+                  <LayoutGroup Id="Stages" ShowCaption="True" TextAlignMode="AlignWithChildren" Index="0" RelativeSize="100" IsNewNode="True">
+                    <LayoutItem Id="Stages" TextAlignMode="AutoSize" ViewItem="Stages" Index="0" RelativeSize="100" IsNewNode="True" />
+                  </LayoutGroup>
+                  <LayoutGroup Id="Certifications" ShowCaption="True" TextAlignMode="AlignWithChildren" Index="1" RelativeSize="100" IsNewNode="True">
+                    <LayoutItem Id="Certifications" TextAlignMode="AutoSize" ViewItem="Certifications" Index="0" RelativeSize="100" IsNewNode="True" />
+                  </LayoutGroup>
+                </TabbedGroup>
+              </LayoutGroup>
+              <LayoutGroup Id="Item2" ShowCaption="True" CaptionLocation="Top" Direction="Vertical" Index="1" TextAlignMode="AlignWithChildren" RelativeSize="100" Caption="Item2" IsNewNode="True">
+                <LayoutItem Id="Measurements" ViewItem="Measurements" Index="0" RelativeSize="100" IsNewNode="True" />
+              </LayoutGroup>
+            </TabbedGroup>
+            <LayoutGroup Id="ProductionLine" Removed="True" />
+          </LayoutGroup>
+          <TabbedGroup Id="Tabs" RelativeSize="68.45637583892618" Index="1" Removed="True">
+            <LayoutGroup Id="Certifications" TextAlignMode="AlignWithChildren" RelativeSize="100">
+              <LayoutItem Id="Certifications" TextAlignMode="AutoSize" RelativeSize="100" />
+            </LayoutGroup>
+            <LayoutGroup Id="Stages" TextAlignMode="AlignWithChildren" RelativeSize="100">
+              <LayoutItem Id="Stages" TextAlignMode="AutoSize" RelativeSize="100" />
+            </LayoutGroup>
+          </TabbedGroup>
+          <LayoutGroup Id="SizeableEditors" RelativeSize="34.340044742729305" Caption="Description" Removed="True">
+            <LayoutItem Id="Description" RelativeSize="100" Removed="True" />
+          </LayoutGroup>
+        </LayoutGroup>
+      </Layout>
+    </DetailView>
+  </Views>
+</Application>

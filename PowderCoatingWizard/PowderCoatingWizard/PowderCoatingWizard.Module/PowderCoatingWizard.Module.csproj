@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+    <Deterministic>false</Deterministic>
+    <AssemblyVersion>1.0.*</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <Configurations>Debug;Release;EasyTest</Configurations>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Remove="Model.DesignedDiffs.xafml" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Model.DesignedDiffs.xafml" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="DevExpress.ExpressApp" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.AuditTrail.Xpo" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Chart" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.CloneObject" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.CodeAnalysis" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.ConditionalAppearance" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Dashboards" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.MultiTenancy.Xpo" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Notifications" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Office" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.PivotGrid" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.ReportsV2" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Scheduler" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Security" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Security.Xpo" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.StateMachine" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.TreeListEditors" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Validation" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.ViewVariantsModule" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Xpo" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.Persistent.Base" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.Persistent.BaseImpl.Xpo" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.Document.Processor" Version="26.1.*-*" />
+    <PackageReference Include="Azure.Identity" Version="1.17.1" />
+    <!-- AI Integration -->
+    <PackageReference Include="Azure.AI.OpenAI" Version="2.2.0-beta.5" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="9.7.1-preview.1.25365.4" />
+    <PackageReference Include="OllamaSharp" Version="5.1.9" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.2" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.14.0" />
+    <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
+    
+  </ItemGroup>
+</Project>

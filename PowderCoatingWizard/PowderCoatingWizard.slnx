@@ -1,0 +1,10 @@
+<Solution>
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="EasyTest" />
+    <BuildType Name="Release" />
+  </Configurations>
+  <Project Path="PowderCoatingWizard/PowderCoatingWizard.Blazor.Server/PowderCoatingWizard.Blazor.Server.csproj" />
+  <Project Path="PowderCoatingWizard/PowderCoatingWizard.Module/PowderCoatingWizard.Module.csproj" />
+  <Project Path="PowderCoatingWizard/PowderCoatingWizard.Win/PowderCoatingWizard.Win.csproj" />
+</Solution>

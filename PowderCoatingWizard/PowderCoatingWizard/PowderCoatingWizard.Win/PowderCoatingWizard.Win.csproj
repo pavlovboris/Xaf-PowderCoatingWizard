@@ -1,0 +1,77 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>ExpressApp.ico</ApplicationIcon>
+    <Deterministic>false</Deterministic>
+    <AssemblyVersion>1.0.*</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <Configurations>Debug;Release;EasyTest</Configurations>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Include="DevExpress.ExpressApp.ListView" Alias="ListView" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Remove="Model.xafml" />
+    <None Remove="Images\Logo.svg" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Model.xafml">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Images\Logo.svg" />
+    <EmbeddedResource Include="Images\ExpressAppLogo.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="DevExpress.AIIntegration.Blazor.Chat.WebView" Version="26.1.2-beta" />
+    <PackageReference Include="DevExpress.ExpressApp" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Chart.Win" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.CodeAnalysis" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Dashboards.Win" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.FileAttachment.Win" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.MultiTenancy.Win.Xpo" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Notifications.Win" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Office.Win" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.PivotGrid.Win" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.ReportsV2.Win" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Scheduler.Win" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Security.Xpo" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.TreeListEditors.Win" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Validation.Win" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Win" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Win.Design" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.ExpressApp.Xpo" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.Persistent.Base" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.Persistent.BaseImpl.Xpo" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.RichEdit.Export" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.Win.BonusSkins" Version="26.1.2-beta" />
+    <PackageReference Include="DevExpress.Win.Design" Version="26.1.*-*" />
+    <!-- AI Integration -->
+    <PackageReference Include="DevExpress.AIIntegration.WinForms.Chat" Version="26.1.*-*" />
+    <PackageReference Include="DevExpress.AIIntegration.OpenAI" Version="26.1.*-*" />
+    <PackageReference Include="Azure.AI.OpenAI" Version="2.2.0-beta.5" />
+    <PackageReference Include="Markdig" Version="1.2.0" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="9.7.1-preview.1.25365.4" />
+    <PackageReference Include="OllamaSharp" Version="5.1.9" />
+    
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PowderCoatingWizard.Module\PowderCoatingWizard.Module.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="UnusableNodes.xml">
+      <DependentUpon>Model.xafml</DependentUpon>
+    </None>
+    <None Update="UnusableNodes1.xml">
+      <DependentUpon>Model.xafml</DependentUpon>
+    </None>
+    <None Update="UnusableNodes2.xml">
+      <DependentUpon>Model.xafml</DependentUpon>
+    </None>
+  </ItemGroup>
+</Project>

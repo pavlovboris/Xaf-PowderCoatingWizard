@@ -1,0 +1,68 @@
+@page "/ai-assistant"
+@using DevExpress.AIIntegration.Blazor.Chat
+@using DevExpress.ExpressApp
+@using Microsoft.Extensions.AI
+@using PowderCoatingWizard.Module.BusinessObjects
+@using PowderCoatingWizard.Module.Services.AI
+@inject INonSecuredObjectSpaceFactory ObjectSpaceFactory
+@inject AISettingsService AiSettings
+@implements IDisposable
+
+<div class="ai-assistant-page">
+    <h4 class="ai-assistant-title">🤖 AI Асистент</h4>
+
+    @if (!_isConfigured)
+    {
+        <div class="ai-not-configured">
+            <p>⚠️ <strong>AI провайдърът не е конфигуриран.</strong></p>
+            <p>Отидете в <strong>AI → AI Provider Settings</strong>, попълнете Endpoint, API Key и Model ID и рестартирайте.</p>
+        </div>
+    }
+    else
+    {
+        <DxAIChat CssClass="ai-chat"
+                  Initialized="OnAIChatInitialized">
+            <EmptyMessageAreaTemplate>
+                <div class="ai-chat-hints">
+                    <p>Примерни въпроси:</p>
+                    <ul>
+                        <li>Анализирай текущото състояние на ваните</li>
+                        <li>Кои параметри са извън трешхолд?</li>
+                        <li>Покажи исторически тренд за последните 30 дни</li>
+                        <li>Препоръчай корективни действия</li>
+                    </ul>
+                </div>
+            </EmptyMessageAreaTemplate>
+        </DxAIChat>
+    }
+</div>
+
+@code {
+    bool _isConfigured;
+    IObjectSpace? _os;
+
+    protected override void OnInitialized()
+    {
+        var settings = AiSettings.LoadSettings();
+        _isConfigured = settings != null && settings.IsEnabled;
+        if (_isConfigured)
+            _os = ObjectSpaceFactory.CreateNonSecuredObjectSpace(typeof(MeasurementSession));
+    }
+
+    private void OnAIChatInitialized(IAIChat chat)
+    {
+        if (_os == null) return;
+
+        // Inject system prompt as system context
+        var systemPrompt = DomainAIContextBuilder.BuildSystemPrompt();
+        chat.LoadMessages(new[]
+        {
+            new DevExpress.AIIntegration.Blazor.Chat.BlazorChatMessage(Microsoft.Extensions.AI.ChatRole.System, systemPrompt)
+        });
+    }
+
+    public void Dispose()
+    {
+        _os?.Dispose();
+    }
+}

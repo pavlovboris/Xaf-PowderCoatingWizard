@@ -1,0 +1,133 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Application>
+  <NavigationItems NavigationStyle="Accordion" />
+  <Options UIType="TabbedMDI" FormStyle="Ribbon" RestoreTabbedMdiLayout="True" ShowTabImage="True" VirtualScrollingEnabled="True" />
+  <SchemaModules>
+    <SchemaModule Name="CloneObjectModule" Version="26.1.2.0" IsNewNode="True" />
+    <SchemaModule Name="SchedulerBlazorModule" Version="26.1.2.0" IsNewNode="True" />
+    <SchemaModule Name="SchedulerModuleBase" Version="26.1.2.0" IsNewNode="True" />
+    <SchemaModule Name="SystemModule" Version="26.1.2.0" IsNewNode="True" />
+  </SchemaModules>
+  <Views>
+    <DetailView Id="LineStage_DetailView">
+      <Items>
+        <BathStageSheetItem Id="LineMeasure" IsNewNode="True" />
+      </Items>
+      <Layout>
+        <LayoutGroup Id="Main" RelativeSize="100">
+          <LayoutGroup Id="SimpleEditors" RelativeSize="100">
+            <TabbedGroup Id="Item1" CaptionLocation="Top" Index="0" RelativeSize="100" IsNewNode="True">
+              <LayoutGroup Id="LineStage" ShowCaption="True" Caption="Line Stage" Direction="Vertical" Index="0" RelativeSize="100" IsNewNode="True">
+                <LayoutGroup Id="Auto191be900-2300-474a-8107-cb79b538ad91" ShowCaption="False" Caption="Auto191be900-2300-474a-8107-cb79b538ad91(5)" Direction="Horizontal" Index="0" RelativeSize="9.957446808510639" IsNewNode="True">
+                  <LayoutGroup Id="LineStage_col1" ShowCaption="False" Index="0" RelativeSize="49.85994397759104" IsNewNode="True">
+                    <LayoutItem Id="Position" ViewItem="Position" Index="0" RelativeSize="37.60683760683761" IsNewNode="True" />
+                    <LayoutItem Id="Name" ViewItem="Name" Index="1" RelativeSize="27.35042735042735" IsNewNode="True" />
+                    <LayoutItem Id="StageFunction" ViewItem="StageFunction" Index="2" RelativeSize="35.042735042735046" IsNewNode="True" />
+                  </LayoutGroup>
+                  <LayoutGroup Id="LineStage_col2" ShowCaption="False" Index="1" RelativeSize="50.14005602240896" IsNewNode="True">
+                    <LayoutItem Id="ChemistryType" ViewItem="ChemistryType" Index="0" RelativeSize="37.60683760683761" IsNewNode="True" />
+                    <LayoutItem Id="IsActive" ViewItem="IsActive" Index="1" RelativeSize="24.786324786324787" IsNewNode="True" />
+                    <LayoutItem Id="DisplayName" ViewItem="DisplayName" Index="2" RelativeSize="37.60683760683761" IsNewNode="True" />
+                  </LayoutGroup>
+                </LayoutGroup>
+                <LayoutItem Id="Description" ViewItem="Description" CaptionLocation="Top" Index="1" RelativeSize="59.829787234042556" IsNewNode="True" />
+                <TabbedGroup Id="Tabs" Index="2" RelativeSize="30.21276595744681" IsNewNode="True">
+                  <LayoutGroup Id="Chemicals" ShowCaption="True" Index="0" RelativeSize="100" IsNewNode="True">
+                    <LayoutItem Id="Chemicals" ViewItem="Chemicals" Index="0" RelativeSize="100" IsNewNode="True" />
+                  </LayoutGroup>
+                  <LayoutGroup Id="Parameters" ShowCaption="True" Index="1" RelativeSize="100" IsNewNode="True">
+                    <LayoutItem Id="Parameters" ViewItem="Parameters" Index="0" RelativeSize="100" IsNewNode="True" />
+                  </LayoutGroup>
+                  <LayoutGroup Id="Criteria" ShowCaption="True" Index="2" RelativeSize="100" IsNewNode="True">
+                    <LayoutItem Id="Criteria" ViewItem="Criteria" Index="0" RelativeSize="100" IsNewNode="True" />
+                  </LayoutGroup>
+                  <LayoutGroup Id="CalculatedFields" ShowCaption="True" Caption="Calculated Fields" Index="3" RelativeSize="100" IsNewNode="True">
+                    <LayoutItem Id="CalculatedFields" ViewItem="CalculatedFields" Index="0" RelativeSize="100" IsNewNode="True" />
+                  </LayoutGroup>
+                  <LayoutGroup Id="ExcelTemplates" ShowCaption="True" Caption="Excel Templates" Index="4" RelativeSize="100" IsNewNode="True">
+                    <LayoutItem Id="ExcelTemplates" ViewItem="ExcelTemplates" Index="0" RelativeSize="100" IsNewNode="True" />
+                  </LayoutGroup>
+                </TabbedGroup>
+              </LayoutGroup>
+              <LayoutGroup Id="Item2" ShowCaption="True" CaptionLocation="Top" Direction="Vertical" Index="1" RelativeSize="100" Caption="Item2" IsNewNode="True">
+                <LayoutItem Id="LineMeasure" ViewItem="LineMeasure" Index="0" RelativeSize="100" ShowCaption="False" CaptionLocation="Top" IsNewNode="True" />
+              </LayoutGroup>
+            </TabbedGroup>
+            <LayoutGroup Id="LineStage" Removed="True" />
+          </LayoutGroup>
+          <TabbedGroup Id="Tabs" RelativeSize="63.16425120772947" Index="1" Removed="True">
+            <LayoutGroup Id="CalculatedFields" RelativeSize="100">
+              <LayoutItem Id="CalculatedFields" RelativeSize="100" />
+            </LayoutGroup>
+            <LayoutGroup Id="Chemicals" RelativeSize="100">
+              <LayoutItem Id="Chemicals" RelativeSize="100" />
+            </LayoutGroup>
+            <LayoutGroup Id="Criteria" RelativeSize="100">
+              <LayoutItem Id="Criteria" RelativeSize="100" />
+            </LayoutGroup>
+            <LayoutGroup Id="ExcelTemplates" RelativeSize="100">
+              <LayoutItem Id="ExcelTemplates" RelativeSize="100" />
+            </LayoutGroup>
+            <LayoutGroup Id="Parameters" RelativeSize="100">
+              <LayoutItem Id="Parameters" RelativeSize="100" />
+            </LayoutGroup>
+          </TabbedGroup>
+          <LayoutGroup Id="SizeableEditors" RelativeSize="31.52173913043478" Caption="Description" Removed="True">
+            <LayoutItem Id="Description" RelativeSize="100" CaptionLocation="Top" Removed="True" />
+          </LayoutGroup>
+        </LayoutGroup>
+      </Layout>
+    </DetailView>
+    <DetailView Id="ProductionLine_DetailView">
+      <Items>
+        <MeasurementSheetItem Id="Measurement" IsNewNode="True" />
+      </Items>
+      <Layout>
+        <LayoutGroup Id="Main" RelativeSize="100">
+          <LayoutGroup Id="SimpleEditors" RelativeSize="100">
+            <TabbedGroup Id="Item1" CaptionLocation="Top" Index="0" RelativeSize="100" IsNewNode="True">
+              <LayoutGroup Id="ProductionLine" ShowCaption="True" Caption="Production Line" Direction="Vertical" Index="0" RelativeSize="100" IsNewNode="True">
+                <LayoutGroup Id="Auto956a3438-5471-4cbe-9039-fa33479beec4" ShowCaption="False" Caption="Auto956a3438-5471-4cbe-9039-fa33479beec4(5)" Direction="Horizontal" Index="0" RelativeSize="14.147521160822249" IsNewNode="True">
+                  <LayoutGroup Id="ProductionLine_col1" ShowCaption="False" Index="0" RelativeSize="49.811794228356334" IsNewNode="True">
+                    <LayoutItem Id="Name" ViewItem="Name" Index="0" RelativeSize="37.60683760683761" IsNewNode="True" />
+                    <LayoutItem Id="Location" ViewItem="Location" Index="1" RelativeSize="27.35042735042735" IsNewNode="True" />
+                    <LayoutItem Id="Orientation" ViewItem="Orientation" Index="2" RelativeSize="35.042735042735046" IsNewNode="True" />
+                  </LayoutGroup>
+                  <LayoutGroup Id="ProductionLine_col2" ShowCaption="False" Index="1" RelativeSize="50.188205771643666" IsNewNode="True">
+                    <LayoutItem Id="PretreatmentMethod" ViewItem="PretreatmentMethod" Index="0" RelativeSize="37.60683760683761" IsNewNode="True" />
+                    <LayoutItem Id="NumberOfStages" ViewItem="NumberOfStages" Index="1" RelativeSize="27.35042735042735" IsNewNode="True" />
+                    <LayoutItem Id="IsActive" ViewItem="IsActive" Index="2" RelativeSize="35.042735042735046" IsNewNode="True" />
+                  </LayoutGroup>
+                </LayoutGroup>
+                <LayoutItem Id="Description" ViewItem="Description" Index="1" RelativeSize="59.73397823458283" IsNewNode="True" />
+                <TabbedGroup Id="Tabs" Index="2" RelativeSize="26.11850060459492" IsNewNode="True">
+                  <LayoutGroup Id="Stages" ShowCaption="True" Index="0" RelativeSize="100" IsNewNode="True">
+                    <LayoutItem Id="Stages" ViewItem="Stages" Index="0" RelativeSize="100" IsNewNode="True" />
+                  </LayoutGroup>
+                  <LayoutGroup Id="Certifications" ShowCaption="True" Index="1" RelativeSize="100" IsNewNode="True">
+                    <LayoutItem Id="Certifications" ViewItem="Certifications" Index="0" RelativeSize="100" IsNewNode="True" />
+                  </LayoutGroup>
+                </TabbedGroup>
+              </LayoutGroup>
+              <LayoutGroup Id="Item2" ShowCaption="True" CaptionLocation="Top" Direction="Vertical" Index="1" RelativeSize="100" Caption="Item2" IsNewNode="True">
+                <LayoutItem Id="Measurement" ViewItem="Measurement" Index="0" RelativeSize="100" IsNewNode="True" />
+              </LayoutGroup>
+            </TabbedGroup>
+            <LayoutGroup Id="ProductionLine" Removed="True" />
+          </LayoutGroup>
+          <TabbedGroup Id="Tabs" RelativeSize="68.45637583892618" Index="1" Removed="True">
+            <LayoutGroup Id="Certifications" RelativeSize="100">
+              <LayoutItem Id="Certifications" RelativeSize="100" />
+            </LayoutGroup>
+            <LayoutGroup Id="Stages" RelativeSize="100">
+              <LayoutItem Id="Stages" RelativeSize="100" />
+            </LayoutGroup>
+          </TabbedGroup>
+          <LayoutGroup Id="SizeableEditors" RelativeSize="34.22818791946309" Caption="Description" Removed="True">
+            <LayoutItem Id="Description" RelativeSize="100" Removed="True" />
+          </LayoutGroup>
+        </LayoutGroup>
+      </Layout>
+    </DetailView>
+  </Views>
+</Application>

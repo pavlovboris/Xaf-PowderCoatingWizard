@@ -1,0 +1,24 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Application>
+  <Views Id="Views">
+    <ListView Id="LineStage_Criteria_ListView">
+      <Columns Id="Columns">
+        <ColumnInfo Id="ConditionMode" Width="138" />
+        <ColumnInfo Id="ResultStatus" Width="119" />
+      </Columns>
+    </ListView>
+    <DetailView Id="LineStage_DetailView">
+      <Layout Id="Layout">
+        <LayoutGroup Id="Main">
+          <LayoutGroup Id="SimpleEditors">
+            <TabbedGroup Id="Item1">
+              <LayoutGroup Id="Item2">
+                <LayoutItem Id="Measures" ViewItem="Measures" />
+              </LayoutGroup>
+            </TabbedGroup>
+          </LayoutGroup>
+        </LayoutGroup>
+      </Layout>
+    </DetailView>
+  </Views>
+</Application>

@@ -1,0 +1,306 @@
+@namespace PowderCoatingWizard.Blazor.Server.Editors
+@using DevExpress.Blazor
+@using PowderCoatingWizard.Module.BusinessObjects
+@using PowderCoatingWizard.Module.Editors
+@using System.Data
+
+@* Parameters are set by ComponentModelObserver from MeasurementSheetModel properties *@
+
+@if (SheetData == null || Columns == null || Columns.Count == 0)
+{
+    <div class="alert alert-info m-3">No stage parameters configured for this line yet.</div>
+}
+else
+{
+    <DxGrid @key="@_gridKey"
+            @ref="_grid"
+            Data="@SheetData"
+            ShowGroupPanel="false"
+            PageSize="50"
+            CssClass="measurement-sheet"
+            ColumnResizeMode="GridColumnResizeMode.NextColumn"
+            ContextMenus="GridContextMenus.Header"
+            ShowFilterRow="false"
+            FilterMenuButtonDisplayMode="GridFilterMenuButtonDisplayMode.Always"
+            EditMode="GridEditMode.EditRow"
+            EditModelSaving="OnEditModelSaving"
+            LayoutAutoSaving="OnLayoutAutoSaving"
+            LayoutAutoLoading="OnLayoutAutoLoading">
+
+        <Columns>
+            <DxGridDataColumn FieldName="@MeasurementSheetService.ColDate"
+                              Caption="Date"
+                              DisplayFormat="dd.MM.yyyy HH:mm"
+                              Width="130px" />
+
+            <DxGridDataColumn FieldName="@MeasurementSheetService.ColOperator"
+                              Caption="Operator"
+                              Width="110px" />
+
+            <DxGridDataColumn FieldName="@MeasurementSheetService.ColNotes"
+                              Caption="Notes"
+                              Width="200px">
+                <CellEditTemplate>
+                    @{
+                        var drv = context.EditModel as System.Data.DataRowView;
+                        string notesVal = drv?[MeasurementSheetService.ColNotes]?.ToString() ?? string.Empty;
+                    }
+                    <DxMemo Value="@notesVal"
+                            ValueChanged="@((string v) => { if (drv != null) drv[MeasurementSheetService.ColNotes] = v; })"
+                            Rows="2"
+                            style="width:100%" />
+                </CellEditTemplate>
+            </DxGridDataColumn>
+
+            @for (int bi = 0; bi < _stageGroups.Count; bi++)
+            {
+                var sg       = _stageGroups[bi];
+                int bandIdx  = bi % BandPalette.Length;
+                string bandKey = $"{sg.Key.Position}|{sg.Key.Name}";
+
+                <DxGridBandColumn @key="@bandKey"
+                                  Caption="@($"{sg.Key.Position}. {sg.Key.Name}")"
+                                  >
+                    <Columns>
+                        @for (int pi = 0; pi < sg.Metas.Count; pi++)
+                        {
+                            var m        = sg.Metas[pi];
+                            string pairCss = $"ms-pair-{bandIdx}-{pi}";
+                            string colKey  = m.ValueKey;
+
+                            <DxGridDataColumn @key="@colKey"
+                                              FieldName="@m.ValueKey"
+                                              Caption="@m.ParameterName"
+                                              MinWidth="80">
+                                <CellDisplayTemplate>
+                                    @{
+                                        var status = GetStatus(context.DataItem, m);
+                                        var css = status switch
+                                        {
+                                            ParameterStatus.Alarm   => "ms-cell-alarm",
+                                            ParameterStatus.Warning => "ms-cell-warning",
+                                            _                       => pairCss
+                                        };
+                                    }
+                                    <span class="@css">@context.DisplayText</span>
+                                </CellDisplayTemplate>
+                                <CellEditTemplate>
+                                    @{
+                                        var editDrv = context.EditModel as System.Data.DataRowView;
+                                        var editVal = editDrv?[m.ValueKey]?.ToString() ?? string.Empty;
+                                    }
+                                    @if (m.IsPredefined)
+                                    {
+                                        var opts = m.Parameter.PredefinedValues
+                                            .OrderBy(v => v.SortOrder).ThenBy(v => v.Name)
+                                            .Select(v => v.Name).ToList();
+                                        <DxComboBox Data="@opts"
+                                                    Value="@editVal"
+                                                    ValueChanged="@((string v) => { if (editDrv != null) editDrv[m.ValueKey] = v; })"
+                                                    ClearButtonDisplayMode="DataEditorClearButtonDisplayMode.Never" />
+                                    }
+                                    else
+                                    {
+                                        <DxTextBox Value="@editVal"
+                                                   ValueChanged="@((string v) => { if (editDrv != null) editDrv[m.ValueKey] = v; })" />
+                                    }
+                                </CellEditTemplate>
+                            </DxGridDataColumn>
+
+                            <DxGridDataColumn @key="@m.StatusKey"
+                                              FieldName="@m.StatusKey"
+                                              Caption="@($"● {m.ParameterName}")"
+                                              MinWidth="70"
+                                              ReadOnly="true">
+                                <CellDisplayTemplate>
+                                    @{
+                                        var st = GetStatus(context.DataItem, m);
+                                        var stCss = st switch
+                                        {
+                                            ParameterStatus.Alarm   => "ms-cell-alarm",
+                                            ParameterStatus.Warning => "ms-cell-warning",
+                                            _                       => pairCss
+                                        };
+                                        var label = st switch
+                                        {
+                                            ParameterStatus.Alarm   => "⛔ ALARM",
+                                            ParameterStatus.Warning => "⚠ WARN",
+                                            ParameterStatus.OK      => "✔ OK",
+                                            _                       => "–"
+                                        };
+                                    }
+                                    <span class="@stCss">@label</span>
+                                </CellDisplayTemplate>
+                            </DxGridDataColumn>
+                        }
+                    </Columns>
+                </DxGridBandColumn>
+            }
+        </Columns>
+
+    </DxGrid>
+}
+
+@* Dynamically generated per-band and per-pair palette styles *@
+@((MarkupString)_generatedStyles)
+
+<style>
+    .ms-cell-alarm   { background:#ffd6d6 !important; color:#b00020; font-weight:600; padding:2px 6px; border-radius:3px; display:inline-block; }
+    .ms-cell-warning { background:#fff3cd !important; color:#7a5c00; font-weight:600; padding:2px 6px; border-radius:3px; display:inline-block; }
+
+    /* word-wrap on column headers */
+    .measurement-sheet .dxbl-grid-header-cell .dxbl-text {
+        white-space: normal;
+        word-break: break-word;
+        line-height: 1.3;
+    }
+</style>
+
+@code {
+    [Parameter] public DataTable        SheetData { get; set; }
+    [Parameter] public List<ColumnMeta> Columns   { get; set; }
+    [Parameter] public string           BlazorLayoutJson { get; set; }
+    [Parameter] public Action<string>   OnLayoutSaved    { get; set; }
+    [Parameter] public Action<DataRowView> OnRowSave     { get; set; }
+
+    DxGrid _grid;
+    int    _gridKey = 0;
+
+    // ── Palette (mirrors Win) ────────────────────────────────────────────────
+    static readonly (int R, int G, int B)[] BandPalette =
+    [
+        (220, 235, 255),   // soft blue
+        (220, 255, 230),   // soft green
+        (255, 245, 210),   // soft amber
+        (245, 220, 255),   // soft purple
+        (210, 255, 255),   // soft cyan
+        (255, 225, 225),   // soft rose
+        (230, 255, 215),   // soft lime
+        (255, 235, 210),   // soft peach
+    ];
+
+    // ── Computed on parameter change ─────────────────────────────────────────
+    record StageGroup((int Position, string Name) Key, List<ColumnMeta> Metas);
+
+    List<StageGroup> _stageGroups   = [];
+    string           _generatedStyles = string.Empty;
+
+    protected override void OnParametersSet()
+    {
+        base.OnParametersSet();
+        RebuildGroups();
+    }
+
+    void RebuildGroups()
+    {
+        var newGroups = Columns == null ? new List<StageGroup>() :
+            Columns
+                .GroupBy(c => (c.StagePosition, c.StageName))
+                .OrderBy(g => g.Key.StagePosition)
+                .Select(g => new StageGroup(g.Key, g.ToList()))
+                .ToList();
+
+        // If column structure changed, force full grid re-create via @key
+        var newKey = string.Join(",", newGroups.SelectMany(g => g.Metas).Select(m => m.Key));
+        var oldKey = string.Join(",", _stageGroups.SelectMany(g => g.Metas).Select(m => m.Key));
+        if (newKey != oldKey) _gridKey++;
+
+        _stageGroups    = newGroups;
+        _generatedStyles = BuildStyles();
+    }
+
+    string BuildStyles()
+    {
+        var sb = new System.Text.StringBuilder("<style>");
+        for (int bi = 0; bi < _stageGroups.Count; bi++)
+        {
+            int bandIdx        = bi % BandPalette.Length;
+            var (R, G, B)      = BandPalette[bandIdx];
+            float baseHue      = RgbToHue(R, G, B);
+
+            // Band header
+            sb.Append($".ms-band-{bandIdx}{{background:rgb({R},{G},{B})!important;font-weight:bold;}}");
+
+            // Per-pair columns
+            for (int pi = 0; pi < _stageGroups[bi].Metas.Count; pi++)
+            {
+                float hue      = (baseHue + pi * 30f) % 360f;
+                var (cr,cg,cb) = HslToRgb(hue, 0.55f, 0.92f);
+                sb.Append($".ms-pair-{bandIdx}-{pi}{{background:rgb({cr},{cg},{cb})!important;}}");
+            }
+        }
+        sb.Append("</style>");
+        return sb.ToString();
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    ParameterStatus GetStatus(object dataItem, ColumnMeta meta)
+    {
+        if (dataItem is not DataRowView drv) return ParameterStatus.OK;
+        if (SheetData == null || !SheetData.Columns.Contains(meta.StatusKey)) return ParameterStatus.OK;
+        return drv.Row[meta.StatusKey] as ParameterStatus? ?? ParameterStatus.OK;
+    }
+
+    async Task OnLayoutAutoSaving(GridPersistentLayoutEventArgs e)
+    {
+        if (_applyingLayout) return;
+        var json = System.Text.Json.JsonSerializer.Serialize(e.Layout);
+        OnLayoutSaved?.Invoke(json);
+        await Task.CompletedTask;
+    }
+
+    async Task OnEditModelSaving(GridEditModelSavingEventArgs e)
+    {
+        if (e.EditModel is System.Data.DataRowView drv)
+            OnRowSave?.Invoke(drv);
+        await Task.CompletedTask;
+    }
+
+    bool _applyingLayout;
+
+    async Task OnLayoutAutoLoading(GridPersistentLayoutEventArgs e)
+    {
+        if (!string.IsNullOrEmpty(BlazorLayoutJson))
+        {
+            try
+            {
+                _applyingLayout = true;
+                e.Layout = System.Text.Json.JsonSerializer.Deserialize<GridPersistentLayout>(BlazorLayoutJson);
+            }
+            catch { /* stale */ }
+            finally { _applyingLayout = false; }
+        }
+        await Task.CompletedTask;
+    }
+
+    // ── Color math
+    static float RgbToHue(int r, int g, int b)
+    {
+        float rf = r / 255f, gf = g / 255f, bf = b / 255f;
+        float max = MathF.Max(rf, MathF.Max(gf, bf));
+        float min = MathF.Min(rf, MathF.Min(gf, bf));
+        float d   = max - min;
+        if (d == 0) return 0;
+        float h = max == rf ? 60f * (((gf - bf) / d) % 6)
+                : max == gf ? 60f * (((bf - rf) / d) + 2)
+                :             60f * (((rf - gf) / d) + 4);
+        return h < 0 ? h + 360f : h;
+    }
+
+    static (int R, int G, int B) HslToRgb(float h, float s, float l)
+    {
+        float c = (1f - MathF.Abs(2f * l - 1f)) * s;
+        float x = c * (1f - MathF.Abs((h / 60f) % 2f - 1f));
+        float m = l - c / 2f;
+        var (r, g, b) = h switch
+        {
+            < 60  => (c, x, 0f),
+            < 120 => (x, c, 0f),
+            < 180 => (0f, c, x),
+            < 240 => (0f, x, c),
+            < 300 => (x, 0f, c),
+            _     => (c, 0f, x)
+        };
+        return ((int)((r + m) * 255), (int)((g + m) * 255), (int)((b + m) * 255));
+    }
+}
