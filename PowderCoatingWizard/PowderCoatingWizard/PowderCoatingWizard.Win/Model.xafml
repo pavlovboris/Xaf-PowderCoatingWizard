@@ -10,6 +10,23 @@
     <SchemaModule Name="SystemWindowsFormsModule" Version="26.1.2.0" IsNewNode="True" />
   </SchemaModules>
   <Views>
+    <ListView Id="AIChatSession_ListView">
+      <Columns>
+        <ColumnInfo Id="CreatedAt" DisplayFormat="{0:dd MMM yyyy  HH:mm}" EditMask="dd MMM yyyy  HH:mm" />
+        <ColumnInfo Id="UpdatedAt" DisplayFormat="{0:dd MMM yyyy  HH:mm}" EditMask="dd MMM yyyy  HH:mm" />
+      </Columns>
+    </ListView>
+    <DetailView Id="AIChatSession_DetailView">
+      <Items>
+        <PropertyEditor Id="CreatedAt" DisplayFormat="{0:dd MMM yyyy  HH:mm}" EditMask="dd MMM yyyy  HH:mm" />
+        <PropertyEditor Id="UpdatedAt" DisplayFormat="{0:dd MMM yyyy  HH:mm}" EditMask="dd MMM yyyy  HH:mm" />
+      </Items>
+    </DetailView>
+    <ListView Id="AIChatSessionMessage_ListView">
+      <Columns>
+        <ColumnInfo Id="SentAt" DisplayFormat="{0:dd MMM yyyy  HH:mm}" EditMask="dd MMM yyyy  HH:mm" />
+      </Columns>
+    </ListView>
     <ListView Id="LineStage_Criteria_ListView">
       <Columns>
         <ColumnInfo Id="SortOrder" Width="144" />

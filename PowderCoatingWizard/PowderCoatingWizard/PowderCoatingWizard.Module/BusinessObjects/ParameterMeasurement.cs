@@ -1,6 +1,7 @@
 using DevExpress.Persistent.Base;
 using DevExpress.Persistent.BaseImpl;
 using DevExpress.Xpo;
+using PowderCoatingWizard.Module.Attributes;
 using System.ComponentModel;
 
 namespace PowderCoatingWizard.Module.BusinessObjects
@@ -13,6 +14,7 @@ namespace PowderCoatingWizard.Module.BusinessObjects
     [DefaultClassOptions]
     [DefaultProperty(nameof(DisplayName))]
     [NavigationItem("Measurements")]
+    [AIQueryable("A single chemistry measurement (numeric or text) taken during a measurement session.")]
     public class ParameterMeasurement : BaseObject
     {
         public ParameterMeasurement(Session session) : base(session) { }

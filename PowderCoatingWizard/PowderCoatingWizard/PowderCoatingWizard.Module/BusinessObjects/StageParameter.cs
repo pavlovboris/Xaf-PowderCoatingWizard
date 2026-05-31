@@ -1,6 +1,7 @@
 using DevExpress.Persistent.Base;
 using DevExpress.Persistent.BaseImpl;
 using DevExpress.Xpo;
+using PowderCoatingWizard.Module.Attributes;
 using System.ComponentModel;
 
 namespace PowderCoatingWizard.Module.BusinessObjects
@@ -12,6 +13,7 @@ namespace PowderCoatingWizard.Module.BusinessObjects
     [DefaultClassOptions]
     [DefaultProperty(nameof(DisplayName))]
     [NavigationItem("Line Configuration")]
+    [AIQueryable("Links a bath parameter to a specific line stage; defines which chemistry parameters are monitored.")]
     public class StageParameter : BaseObject
     {
         public StageParameter(Session session) : base(session) { }

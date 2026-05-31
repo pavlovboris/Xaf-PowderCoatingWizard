@@ -1,6 +1,7 @@
 using DevExpress.Persistent.Base;
 using DevExpress.Persistent.BaseImpl;
 using DevExpress.Xpo;
+using PowderCoatingWizard.Module.Attributes;
 using System.ComponentModel;
 
 namespace PowderCoatingWizard.Module.BusinessObjects
@@ -13,6 +14,7 @@ namespace PowderCoatingWizard.Module.BusinessObjects
     [DefaultProperty(nameof(Name))]
     [NavigationItem("Line Configuration")]
     [ImageName("BO_Organization")]
+    [AIQueryable("A powder-coating production line grouping multiple bath stages.")]
     public class ProductionLine : BaseObject
     {
         public ProductionLine(Session session) : base(session) { }

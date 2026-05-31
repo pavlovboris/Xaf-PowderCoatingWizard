@@ -5,6 +5,7 @@ using DevExpress.AIIntegration.WinForms.Chat;
 using Markdig;
 using Microsoft.AspNetCore.Components;
 using DevExpress.ExpressApp;
+using DevExpress.ExpressApp.Security;
 using DevExpress.XtraEditors;
 using Microsoft.Extensions.AI;
 using PowderCoatingWizard.Module.BusinessObjects;
@@ -40,13 +41,19 @@ namespace PowderCoatingWizard.Win.Controllers
         // Whether we registered the client — tracked so Dispose can unregister.
         private bool _clientRegistered;
 
+        // Persistent chat session — null means ephemeral (not saved).
+        private AIChatSession? _session;
+        // Separate ObjectSpace for session writes to avoid polluting the main _os.
+        private readonly IObjectSpace? _sessionOs;
+
         public AIAssistantForm(
             IChatClient? chatClient,
             IEmbeddingGenerator<string, Embedding<float>>? embeddingGenerator,
             IObjectSpace os,
             IObjectSpaceFactory? osFactory,
             LineStage? stage,
-            AIAgent? agent = null)
+            AIAgent? agent = null,
+            AIChatSession? session = null)
         {
             _os = os;
             _osFactory = osFactory;
@@ -57,11 +64,49 @@ namespace PowderCoatingWizard.Win.Controllers
             _agentOid = agent?.Oid;
             _agent = _agentOid.HasValue ? _os.GetObjectByKey<AIAgent>(_agentOid.Value) : null;
 
+            // Session persistence: create a dedicated ObjectSpace for writing session data.
+            if (osFactory != null)
+            {
+                _sessionOs = osFactory.CreateObjectSpace(typeof(AIChatSession));
+                if (session != null)
+                {
+                    // Reload session in our own ObjectSpace so we can safely attach new messages.
+                    _session = _sessionOs.GetObjectByKey<AIChatSession>(session.Oid);
+                }
+                else
+                {
+                    // A new session will be created lazily on the first message.
+                    _session = null;
+                }
+            }
+
             if (chatClient != null && embeddingGenerator != null && osFactory != null)
             {
+                // Load DB query settings from AIProviderSettings
+                var settings = _os.FirstOrDefault<Module.BusinessObjects.AI.AIProviderSettings>(s => true);
+                int dbMaxRecords = settings?.DbQueryMaxRecords ?? 50;
+                bool dbQueryEnabled = settings?.DbQueryEnabled ?? true;
+
+                // Build the tool list — always include BathDataTool; add DB query tools when enabled
+                var toolList = new List<Microsoft.Extensions.AI.AITool>();
+
+                var bathTool = Microsoft.Extensions.AI.AIFunctionFactory.Create(
+                    new BathDataToolService(_os).GetBathData);
+                toolList.Add(bathTool);
+
+                if (dbQueryEnabled)
+                {
+                    var schema = new SchemaDiscoveryService();
+                    var dbQueryService = new DatabaseQueryToolService(_os, schema, dbMaxRecords);
+                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(dbQueryService.ListEntities, "list_entities"));
+                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(dbQueryService.DescribeEntity, "describe_entity"));
+                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(dbQueryService.QueryEntity, "query_entity"));
+                }
+
                 _ragClient = new RagChatClient(chatClient,
                     new RagSearchService(osFactory, new EmbeddingService(embeddingGenerator)),
-                    _agentOid);
+                    _agentOid,
+                    toolList);
 
                 // Register our RAG-augmented client as the global provider so AIChatControl
                 // picks it up natively with streaming and the thinking indicator.
@@ -112,6 +157,10 @@ namespace PowderCoatingWizard.Win.Controllers
                 _chat.Initialized += OnChatInitialized;
             }
 
+            // On close, persist the full chat history to the session.
+            if (_sessionOs != null)
+                FormClosing += OnFormClosing;
+
             Controls.Add(_chat);
         }
 
@@ -119,6 +168,79 @@ namespace PowderCoatingWizard.Win.Controllers
         {
             var html = Markdown.ToHtml(e.MarkdownText ?? string.Empty, new MarkdownPipelineBuilder().UseAdvancedExtensions().Build());
             e.HtmlText = new MarkupString(html);
+        }
+
+        // ------------------------------------------------------------------
+        // Session persistence helpers
+        // ------------------------------------------------------------------
+
+        private void OnFormClosing(object? sender, System.Windows.Forms.FormClosingEventArgs e)
+        {
+            // SaveMessages returns the full conversation (excluding system messages from LoadMessages).
+            var messages = _chat.SaveMessages()?.OfType<BlazorChatMessage>().ToList();
+            if (messages == null || messages.Count == 0) return;
+
+            // Only persist non-system visible messages.
+            var visible = messages.Where(m => m.Role != ChatMessageRole.System).ToList();
+            if (visible.Count == 0) return;
+
+            try
+            {
+                EnsureSessionCreated();
+
+                // Remove old stored messages (re-save the full history on close).
+                var existing = _session!.Messages.ToList();
+                foreach (var old in existing)
+                    _sessionOs!.Delete(old);
+
+                int order = 0;
+                foreach (var m in visible)
+                {
+                    var msg = _sessionOs!.CreateObject<AIChatSessionMessage>();
+                    msg.ChatSession = _session;
+                    msg.Role = m.Role == ChatMessageRole.Assistant ? "assistant" : "user";
+                    msg.Content = m.Content ?? string.Empty;
+                    msg.SentAt = DateTime.UtcNow;
+                    msg.SortOrder = order++;
+                }
+
+                _session!.UpdatedAt = DateTime.UtcNow;
+                if (string.IsNullOrWhiteSpace(_session.Title))
+                {
+                    var firstUser = visible.FirstOrDefault(m => m.Role == ChatMessageRole.User);
+                    if (firstUser != null)
+                    {
+                        var text = firstUser.Content ?? string.Empty;
+                        _session.Title = text.Length > 200 ? text[..200] : text;
+                    }
+                }
+
+                _sessionOs!.CommitChanges();
+            }
+            catch (Exception ex)
+            {
+                DevExpress.Persistent.Base.Tracing.Tracer.LogError(ex);
+            }
+        }
+
+        private void EnsureSessionCreated()
+        {
+            if (_session != null || _sessionOs == null) return;
+
+            _session = _sessionOs.CreateObject<AIChatSession>();
+            _session.CreatedAt = DateTime.UtcNow;
+            _session.UpdatedAt = DateTime.UtcNow;
+            _session.Agent = _agentOid.HasValue
+                ? _sessionOs.GetObjectByKey<AIAgent>(_agentOid.Value)
+                : null;
+            _session.IsPublic = false;
+
+            var currentUserName = SecuritySystem.CurrentUserName;
+            if (!string.IsNullOrEmpty(currentUserName))
+            {
+                var user = _sessionOs.FirstOrDefault<ApplicationUser>(u => u.UserName == currentUserName);
+                _session.Owner = user!;
+            }
         }
 
         private async void OnChatInitialized(object? sender, AIChatControlInitializedEventArgs e)
@@ -167,10 +289,28 @@ namespace PowderCoatingWizard.Win.Controllers
 
                 // Seed the conversation with the system prompt as a hidden message.
                 // The RagChatClient will receive this context on every subsequent turn.
-                _chat.LoadMessages(new[]
+                var seedMessages = new List<BlazorChatMessage>
                 {
                     new BlazorChatMessage(ChatRole.System, _systemPrompt)
-                });
+                };
+
+                // If restoring an existing session, replay saved messages.
+                if (_session != null && _session.Messages.Count > 0)
+                {
+                    foreach (var m in _session.Messages.OrderBy(m => m.SortOrder))
+                    {
+                        var role = m.Role switch
+                        {
+                            "assistant" => ChatRole.Assistant,
+                            "system"    => ChatRole.System,
+                            _           => ChatRole.User
+                        };
+                        seedMessages.Add(new BlazorChatMessage(role, m.Content ?? string.Empty));
+                    }
+                    Text = $"{Text} — (Restored)";
+                }
+
+                _chat.LoadMessages(seedMessages.ToArray());
             }
             catch (Exception ex)
             {
@@ -194,6 +334,7 @@ namespace PowderCoatingWizard.Win.Controllers
                     _clientRegistered = false;
                 }
                 _ragClient?.Dispose();
+                _sessionOs?.Dispose();
                 _os?.Dispose();
                 _chat?.Dispose();
             }

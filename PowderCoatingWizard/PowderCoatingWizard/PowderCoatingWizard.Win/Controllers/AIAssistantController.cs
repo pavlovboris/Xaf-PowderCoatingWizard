@@ -72,7 +72,24 @@ namespace PowderCoatingWizard.Win.Controllers
             }
 
             var os = Application.CreateObjectSpace(typeof(MeasurementSession));
-            var form = new AIAssistantForm(chatClient, embGen, os, osFactory, currentStage, selectedAgent);
+
+            // Show session picker so user can restore a previous session or start a new one.
+            AIChatSession? selectedSession = null;
+            if (osFactory != null)
+            {
+                using var sessionOs = osFactory.CreateObjectSpace(typeof(AIChatSession));
+                using var sessionPicker = new AIChatSessionPickerForm(sessionOs);
+                if (sessionPicker.ShowDialog() != System.Windows.Forms.DialogResult.OK)
+                {
+                    os.Dispose();
+                    return;
+                }
+                // Re-load the session in the form's own OS if one was chosen.
+                if (!sessionPicker.IsNew && sessionPicker.SelectedSession != null)
+                    selectedSession = os.GetObjectByKey<AIChatSession>(sessionPicker.SelectedSession.Oid);
+            }
+
+            var form = new AIAssistantForm(chatClient, embGen, os, osFactory, currentStage, selectedAgent, selectedSession);
             form.Show();
         }
     }

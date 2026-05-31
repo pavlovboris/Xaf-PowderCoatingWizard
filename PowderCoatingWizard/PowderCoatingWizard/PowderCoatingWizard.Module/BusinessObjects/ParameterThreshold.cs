@@ -1,6 +1,7 @@
 using DevExpress.Persistent.Base;
 using DevExpress.Persistent.BaseImpl;
 using DevExpress.Xpo;
+using PowderCoatingWizard.Module.Attributes;
 using System.ComponentModel;
 
 namespace PowderCoatingWizard.Module.BusinessObjects
@@ -13,7 +14,7 @@ namespace PowderCoatingWizard.Module.BusinessObjects
     [DefaultProperty(nameof(DisplayName))]
     //[NavigationItem("Bath Configuration")]
     [NavigationItem(false)]
-
+    [AIQueryable("Threshold/limit definition for a bath parameter (Warning, Alarm, Target levels).")]
     public class ParameterThreshold : BaseObject
     {
         public ParameterThreshold(Session session) : base(session) { }

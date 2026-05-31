@@ -30,6 +30,8 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
         bool _isEnabled;
         int _ragTopK = 5;
         float _ragMinScore = 0.4f;
+        bool _dbQueryEnabled = true;
+        int _dbQueryMaxRecords = 50;
 
         [Size(200)]
         public string DisplayName
@@ -119,6 +121,26 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
         {
             get => _ragMinScore;
             set => SetPropertyValue(nameof(RagMinScore), ref _ragMinScore, value);
+        }
+
+        /// <summary>
+        /// Enables or disables the AI database query tools (list_entities, describe_entity, query_entity).
+        /// </summary>
+        public bool DbQueryEnabled
+        {
+            get => _dbQueryEnabled;
+            set => SetPropertyValue(nameof(DbQueryEnabled), ref _dbQueryEnabled, value);
+        }
+
+        /// <summary>
+        /// Maximum number of records the AI assistant can retrieve in a single query_entity call.
+        /// Acts as a safety cap. Default is 50.
+        /// </summary>
+        [ModelDefault("DisplayFormat", "{0}")]
+        public int DbQueryMaxRecords
+        {
+            get => _dbQueryMaxRecords;
+            set => SetPropertyValue(nameof(DbQueryMaxRecords), ref _dbQueryMaxRecords, value);
         }
 
         // ── Non-persistent helper ──────────────────────────────────────────────
