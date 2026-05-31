@@ -1,6 +1,7 @@
 using DevExpress.Persistent.Base;
 using DevExpress.Persistent.BaseImpl;
 using DevExpress.Xpo;
+using PowderCoatingWizard.Module.Attributes;
 using System.ComponentModel;
 
 namespace PowderCoatingWizard.Module.BusinessObjects
@@ -9,6 +10,7 @@ namespace PowderCoatingWizard.Module.BusinessObjects
     [DefaultProperty(nameof(Name))]
     [NavigationItem("Bath Configuration")]
     [ImageName("BO_Parameter")]
+    [AIQueryable("Definition of a measurable bath parameter (e.g. pH, temperature, concentration). Includes unit, category, and value type.")]
     public class BathParameter : BaseObject
     {
         public BathParameter(Session session) : base(session) { }

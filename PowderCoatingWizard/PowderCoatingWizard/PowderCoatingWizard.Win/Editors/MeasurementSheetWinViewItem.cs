@@ -1,6 +1,7 @@
 using DevExpress.ExpressApp;
 using DevExpress.ExpressApp.Editors;
 using DevExpress.ExpressApp.Model;
+using DevExpress.XtraEditors;
 using DevExpress.XtraEditors.Repository;
 using DevExpress.XtraGrid;
 using DevExpress.XtraGrid.Columns;
@@ -9,6 +10,7 @@ using PowderCoatingWizard.Module.BusinessObjects;
 using PowderCoatingWizard.Module.Editors;
 using System.Data;
 using System.Drawing;
+using System.Windows.Forms;
 
 namespace PowderCoatingWizard.Win.Editors
 {
@@ -60,6 +62,15 @@ namespace PowderCoatingWizard.Win.Editors
         private List<ColumnMeta>              _columns  = [];
         private bool                          _savingLayout;
 
+        // Filter state
+        private DateTime? _dateFrom = DateTime.Today.AddDays(-30);
+        private DateTime? _dateTo   = null;
+
+        // Toolbar controls
+        private DateEdit     _deFrom;
+        private DateEdit     _deTo;
+        private SimpleButton _btnLoad;
+
         // Maps ValueKey/StatusKey → pair-specific cell colour so OnCustomDrawCell can look it up
         private Dictionary<string, Color> _columnCellColor = [];
 
@@ -87,7 +98,77 @@ namespace PowderCoatingWizard.Win.Editors
 
         protected override object CreateControlCore()
         {
-            _grid     = new GridControl { Dock = System.Windows.Forms.DockStyle.Fill };
+            // ── Toolbar ────────────────────────────────────────────────────
+            var lblFrom = new LabelControl
+            {
+                Text         = "From:",
+                AutoSizeMode = LabelAutoSizeMode.None,
+                Width        = 36,
+                Appearance   = { TextOptions = { VAlignment = DevExpress.Utils.VertAlignment.Center } },
+                Margin       = new Padding(0, 0, 4, 0),
+            };
+            _deFrom = new DateEdit { Width = 108, Margin = new Padding(0, 0, 10, 0) };
+            _deFrom.Properties.NullDate              = DateTime.MinValue;
+            _deFrom.Properties.AllowNullInput        = DevExpress.Utils.DefaultBoolean.True;
+            _deFrom.Properties.DisplayFormat.FormatType   = DevExpress.Utils.FormatType.DateTime;
+            _deFrom.Properties.DisplayFormat.FormatString = "dd.MM.yyyy";
+            _deFrom.Properties.EditFormat.FormatType      = DevExpress.Utils.FormatType.DateTime;
+            _deFrom.Properties.EditFormat.FormatString    = "dd.MM.yyyy";
+            _deFrom.DateTime = _dateFrom ?? DateTime.MinValue;
+
+            var lblTo = new LabelControl
+            {
+                Text         = "To:",
+                AutoSizeMode = LabelAutoSizeMode.None,
+                Width        = 24,
+                Appearance   = { TextOptions = { VAlignment = DevExpress.Utils.VertAlignment.Center } },
+                Margin       = new Padding(0, 0, 4, 0),
+            };
+            _deTo = new DateEdit { Width = 108, Margin = new Padding(0, 0, 12, 0) };
+            _deTo.Properties.NullDate              = DateTime.MinValue;
+            _deTo.Properties.AllowNullInput        = DevExpress.Utils.DefaultBoolean.True;
+            _deTo.Properties.DisplayFormat.FormatType   = DevExpress.Utils.FormatType.DateTime;
+            _deTo.Properties.DisplayFormat.FormatString = "dd.MM.yyyy";
+            _deTo.Properties.EditFormat.FormatType      = DevExpress.Utils.FormatType.DateTime;
+            _deTo.Properties.EditFormat.FormatString    = "dd.MM.yyyy";
+
+            _btnLoad = new SimpleButton { Text = "Load", Width = 72, Height = 24 };
+            _btnLoad.Click += (s, e) =>
+            {
+                _dateFrom = _deFrom.DateTime == DateTime.MinValue ? null : (DateTime?)_deFrom.DateTime.Date;
+                _dateTo   = _deTo.DateTime   == DateTime.MinValue ? null : (DateTime?)_deTo.DateTime.Date.AddDays(1).AddTicks(-1);
+                LoadData();
+            };
+
+            var toolbar = new Panel
+            {
+                Dock      = DockStyle.Top,
+                Height    = 36,
+                BackColor = Color.FromArgb(245, 247, 250),
+            };
+            toolbar.Paint += (s, e) =>
+            {
+                var p = toolbar;
+                using var pen = new System.Drawing.Pen(Color.FromArgb(210, 215, 220));
+                e.Graphics.DrawLine(pen, 0, p.Height - 1, p.Width, p.Height - 1);
+            };
+
+            static void CenterV(Control c, int h) => c.Top = (h - c.Height) / 2;
+            toolbar.SizeChanged += (s, e) =>
+            {
+                int left = 8;
+                int h    = toolbar.Height;
+                lblFrom.Height = 20; lblFrom.Left = left; CenterV(lblFrom, h); left += lblFrom.Width + lblFrom.Margin.Right;
+                _deFrom.Height = 22; _deFrom.Left = left; CenterV(_deFrom, h); left += _deFrom.Width + _deFrom.Margin.Right;
+                lblTo.Height   = 20; lblTo.Left   = left; CenterV(lblTo,   h); left += lblTo.Width   + lblTo.Margin.Right;
+                _deTo.Height   = 22; _deTo.Left   = left; CenterV(_deTo,   h); left += _deTo.Width   + _deTo.Margin.Right;
+                _btnLoad.Height = 24; _btnLoad.Left = left; CenterV(_btnLoad, h);
+            };
+            toolbar.Controls.AddRange([lblFrom, _deFrom, lblTo, _deTo, _btnLoad]);
+            toolbar.Size = toolbar.Size; // trigger initial layout
+
+            // ── Grid ───────────────────────────────────────────────────────
+            _grid     = new GridControl { Dock = DockStyle.Fill };
             _gridView = new AdvBandedGridView(_grid)
             {
                 OptionsBehavior      = { Editable = true },
@@ -109,8 +190,13 @@ namespace PowderCoatingWizard.Win.Editors
             _gridView.CustomDrawBandHeader   += OnCustomDrawBandHeader;
             _gridView.RowUpdated             += OnRowUpdated;
 
+            // ── Container ──────────────────────────────────────────────────
+            var container = new Panel { Dock = DockStyle.Fill };
+            container.Controls.Add(_grid);
+            container.Controls.Add(toolbar);
+
             LoadData();
-            return _grid;
+            return container;
         }
 
         protected override void SaveModelCore()
@@ -167,7 +253,7 @@ namespace PowderCoatingWizard.Win.Editors
         {
             if (_os == null || CurrentObject is not ProductionLine line) return;
 
-            var (table, cols) = MeasurementSheetService.Build(_os, line);
+            var (table, cols) = MeasurementSheetService.Build(_os, line, _dateFrom, _dateTo);
             _columns = cols;
             _columnCellColor.Clear();
 
@@ -231,19 +317,27 @@ namespace PowderCoatingWizard.Win.Editors
             // Date
             var dateCol = new BandedGridColumn
             {
-                FieldName                 = MeasurementSheetService.ColDate,
-                Caption                   = "Date",
-                OwnerBand                 = sessionBand,
-                Visible                   = true,
-                Width                     = 140,
-                OptionsColumn             = { ReadOnly = true }
+                FieldName     = MeasurementSheetService.ColDate,
+                Caption       = "Date",
+                OwnerBand     = sessionBand,
+                Visible       = true,
+                Width         = 140,
+                OptionsColumn = { ReadOnly = false }
             };
             dateCol.DisplayFormat.FormatType   = DevExpress.Utils.FormatType.DateTime;
             dateCol.DisplayFormat.FormatString = "dd.MM.yyyy HH:mm";
+            var dateRepo = new RepositoryItemDateEdit();
+            dateRepo.DisplayFormat.FormatType   = DevExpress.Utils.FormatType.DateTime;
+            dateRepo.DisplayFormat.FormatString = "dd.MM.yyyy HH:mm";
+            dateRepo.EditFormat.FormatType      = DevExpress.Utils.FormatType.DateTime;
+            dateRepo.EditFormat.FormatString    = "dd.MM.yyyy HH:mm";
+            dateRepo.Mask.MaskType              = DevExpress.XtraEditors.Mask.MaskType.DateTime;
+            dateRepo.Mask.EditMask              = "dd.MM.yyyy HH:mm";
+            dateCol.ColumnEdit = dateRepo;
             dateCol.AppearanceHeader.TextOptions.WordWrap = DevExpress.Utils.WordWrap.Wrap;
             dateCol.AppearanceHeader.Options.UseTextOptions = true;
 
-            // Operator
+            // Operator — combo from line operators, but still allows free text
             var opCol = new BandedGridColumn
             {
                 FieldName     = MeasurementSheetService.ColOperator,
@@ -251,8 +345,15 @@ namespace PowderCoatingWizard.Win.Editors
                 OwnerBand     = sessionBand,
                 Visible       = true,
                 Width         = 120,
-                OptionsColumn = { ReadOnly = true }
+                OptionsColumn = { ReadOnly = false }
             };
+            if (CurrentObject is ProductionLine lineForOp)
+            {
+                var opRepo = new RepositoryItemComboBox { TextEditStyle = DevExpress.XtraEditors.Controls.TextEditStyles.Standard };
+                foreach (var op in lineForOp.Operators.Where(o => o.IsActive).OrderBy(o => o.Name))
+                    opRepo.Items.Add(op.Name);
+                opCol.ColumnEdit = opRepo;
+            }
             opCol.AppearanceHeader.TextOptions.WordWrap = DevExpress.Utils.WordWrap.Wrap;
             opCol.AppearanceHeader.Options.UseTextOptions = true;
 
@@ -305,12 +406,32 @@ namespace PowderCoatingWizard.Win.Editors
                     };
                     valCol.AppearanceHeader.TextOptions.WordWrap = DevExpress.Utils.WordWrap.Wrap;
                     valCol.AppearanceHeader.Options.UseTextOptions = true;
+
+                    switch (meta.Parameter.ValueType)
                     {
-                        var repo = new RepositoryItemComboBox { TextEditStyle = DevExpress.XtraEditors.Controls.TextEditStyles.DisableTextEditor };
-                        foreach (var opt in meta.Parameter.PredefinedValues
-                            .OrderBy(v => v.SortOrder).ThenBy(v => v.Name))
-                            repo.Items.Add(opt.Name);
-                        valCol.ColumnEdit = repo;
+                        case ParameterValueType.Numeric:
+                        {
+                            var repo = new RepositoryItemSpinEdit();
+                            repo.IsFloatValue = true;
+                            repo.Increment    = 0.01m;
+                            repo.MinValue     = decimal.MinValue;
+                            repo.MaxValue     = decimal.MaxValue;
+                            valCol.ColumnEdit = repo;
+                            break;
+                        }
+                        case ParameterValueType.Predefined:
+                        {
+                            var repo = new RepositoryItemComboBox
+                            {
+                                TextEditStyle = DevExpress.XtraEditors.Controls.TextEditStyles.Standard
+                            };
+                            foreach (var opt in meta.Parameter.PredefinedValues
+                                .OrderBy(v => v.SortOrder).ThenBy(v => v.Name))
+                                repo.Items.Add(opt.Name);
+                            valCol.ColumnEdit = repo;
+                            break;
+                        }
+                        // ParameterValueType.FreeText — default TextEdit, no ColumnEdit needed
                     }
 
                     _gridView?.Columns.Add(valCol);
@@ -342,8 +463,8 @@ namespace PowderCoatingWizard.Win.Editors
             // ── Step 5: restore saved layout (widths, order, filters…) ────
             RestoreLayout();
 
-            // RestoreLayout (FullLayout) is XtraSerializable and may overwrite
-            // OptionsMenu settings saved in an older layout without CF enabled.
+            // RestoreLayout (FullLayout) overwrites OptionsBehavior/OptionsMenu — restore critical settings.
+            _gridView.OptionsBehavior.Editable                 = true;
             _gridView.OptionsMenu.ShowConditionalFormattingItem = true;
 
             // ── Step 6: re-tag columns – FullLayout restore creates new column
@@ -354,17 +475,33 @@ namespace PowderCoatingWizard.Win.Editors
         private void RetagColumns()
         {
             if (_gridView == null) return;
+
             // Build FieldName → ColumnMeta lookup
-            var lookup = new Dictionary<string, ColumnMeta>(StringComparer.Ordinal);
+            var valueKeys  = new HashSet<string>(_columns.Select(m => m.ValueKey),  StringComparer.Ordinal);
+            var statusKeys = new HashSet<string>(_columns.Select(m => m.StatusKey), StringComparer.Ordinal);
+            var lookup     = new Dictionary<string, ColumnMeta>(StringComparer.Ordinal);
             foreach (var meta in _columns)
             {
                 lookup[meta.ValueKey]  = meta;
                 lookup[meta.StatusKey] = meta;
             }
+
+            // Fixed session columns — only OID is read-only; Date, Operator and Notes are editable
+            var readOnlyFields = new HashSet<string>(
+                [MeasurementSheetService.ColOid],
+                StringComparer.Ordinal);
+
             foreach (BandedGridColumn col in _gridView.Columns)
             {
+                // Restore Tag
                 if (lookup.TryGetValue(col.FieldName, out var meta))
                     col.Tag = meta;
+
+                // FullLayout restore serializes OptionsColumn.ReadOnly — force correct values.
+                if (readOnlyFields.Contains(col.FieldName) || statusKeys.Contains(col.FieldName))
+                    col.OptionsColumn.ReadOnly = true;
+                else if (valueKeys.Contains(col.FieldName) || col.FieldName == MeasurementSheetService.ColNotes)
+                    col.OptionsColumn.ReadOnly = false;
 
                 // FullLayout restore wipes AppearanceHeader — reapply word-wrap on every column.
                 col.AppearanceHeader.TextOptions.WordWrap   = DevExpress.Utils.WordWrap.Wrap;
@@ -443,10 +580,13 @@ namespace PowderCoatingWizard.Win.Editors
             var session    = _os.GetObjectByKey<MeasurementSession>(sessionOid);
             if (session == null) return;
 
-            // Persist the Notes field
-            var newNotes = editedRow[MeasurementSheetService.ColNotes]?.ToString() ?? string.Empty;
-            if (session.Notes != newNotes)
-                session.Notes = newNotes;
+            // Persist the Date, Notes and Operator fields
+            var newNotes    = editedRow[MeasurementSheetService.ColNotes]?.ToString()    ?? string.Empty;
+            var newOperator = editedRow[MeasurementSheetService.ColOperator]?.ToString() ?? string.Empty;
+            if (editedRow[MeasurementSheetService.ColDate] is DateTime newDate && session.MeasuredOn != newDate)
+                session.MeasuredOn = newDate;
+            if (session.Notes        != newNotes)    session.Notes        = newNotes;
+            if (session.OperatorName != newOperator) session.OperatorName = newOperator;
 
             foreach (var meta in _columns)
             {

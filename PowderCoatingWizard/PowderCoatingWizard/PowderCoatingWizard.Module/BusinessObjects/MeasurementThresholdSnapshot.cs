@@ -1,6 +1,7 @@
 using DevExpress.Persistent.Base;
 using DevExpress.Persistent.BaseImpl;
 using DevExpress.Xpo;
+using PowderCoatingWizard.Module.Attributes;
 using System.ComponentModel;
 
 namespace PowderCoatingWizard.Module.BusinessObjects
@@ -18,6 +19,7 @@ namespace PowderCoatingWizard.Module.BusinessObjects
     /// </summary>
     [DefaultProperty(nameof(DisplayName))]
     [NavigationItem("Measurements")]
+    [AIQueryable("Historical snapshot of a threshold value at the exact moment a measurement was taken — for audit and trend analysis.")]
     public class MeasurementThresholdSnapshot : BaseObject
     {
         public MeasurementThresholdSnapshot(Session session) : base(session) { }

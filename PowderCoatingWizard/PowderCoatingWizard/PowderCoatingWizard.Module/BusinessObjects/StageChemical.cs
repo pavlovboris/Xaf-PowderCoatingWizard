@@ -1,6 +1,7 @@
 using DevExpress.Persistent.Base;
 using DevExpress.Persistent.BaseImpl;
 using DevExpress.Xpo;
+using PowderCoatingWizard.Module.Attributes;
 using System.ComponentModel;
 
 namespace PowderCoatingWizard.Module.BusinessObjects
@@ -14,6 +15,7 @@ namespace PowderCoatingWizard.Module.BusinessObjects
     [DefaultProperty(nameof(DisplayName))]
     //[NavigationItem("Chemistry")]
     [NavigationItem(false)]
+    [AIQueryable("Chemical product linked to a bath stage — includes product name, working concentration, and dosing info.")]
     public class StageChemical : BaseObject
     {
         public StageChemical(Session session) : base(session) { }

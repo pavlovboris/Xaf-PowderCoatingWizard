@@ -22,7 +22,8 @@ namespace PowderCoatingWizard.Module.Editors
         /// Key format: "{stagePosition}|{stageName}|{parameterName}"
         /// </summary>
         public static (DataTable Table, List<ColumnMeta> Columns) Build(
-            IObjectSpace objectSpace, ProductionLine line)
+            IObjectSpace objectSpace, ProductionLine line,
+            DateTime? dateFrom = null, DateTime? dateTo = null)
         {
             var table = new DataTable();
 
@@ -32,9 +33,11 @@ namespace PowderCoatingWizard.Module.Editors
             table.Columns.Add(ColOperator, typeof(string));
             table.Columns.Add(ColNotes,    typeof(string));
 
-            // Load sessions for this line
+            // Load sessions for this line, respecting optional date range
             var sessions = objectSpace.GetObjects<MeasurementSession>()
                 .Where(s => s.Line?.Oid == line.Oid)
+                .Where(s => dateFrom == null || s.MeasuredOn >= dateFrom.Value)
+                .Where(s => dateTo   == null || s.MeasuredOn <= dateTo.Value)
                 .OrderByDescending(s => s.MeasuredOn)
                 .ToList();
 

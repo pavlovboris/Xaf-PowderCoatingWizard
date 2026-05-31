@@ -109,6 +109,11 @@ namespace PowderCoatingWizard.Module.BusinessObjects
         [ToolTip("Quality certifications and standards applicable to this line.")]
         public XPCollection<LineCertification> Certifications
             => GetCollection<LineCertification>(nameof(Certifications));
+
+        [Aggregated, Association("ProductionLine-Operators")]
+        [ToolTip("Operators assigned to this production line.")]
+        public XPCollection<Operator> Operators
+            => GetCollection<Operator>(nameof(Operators));
     }
 
     public enum LineOrientation

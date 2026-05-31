@@ -1,6 +1,7 @@
 using DevExpress.Persistent.Base;
 using DevExpress.Persistent.BaseImpl;
 using DevExpress.Xpo;
+using PowderCoatingWizard.Module.Attributes;
 using System.ComponentModel;
 
 namespace PowderCoatingWizard.Module.BusinessObjects
@@ -14,6 +15,7 @@ namespace PowderCoatingWizard.Module.BusinessObjects
     [DefaultProperty(nameof(DisplayName))]
     [NavigationItem("Measurements")]
     [ImageName("BO_SaleOrder")]
+    [AIQueryable("One full operator measurement round for a production line — date, operator, line, and status. Parent of all individual parameter measurements.")]
     public class MeasurementSession : BaseObject
     {
         public MeasurementSession(Session session) : base(session) { }
@@ -22,6 +24,7 @@ namespace PowderCoatingWizard.Module.BusinessObjects
         DateTime measuredOn;
         string operatorName;
         string notes;
+        Operator @operator;
 
         [ToolTip("The production line this measurement round was performed on.")]
         public ProductionLine Line
@@ -43,6 +46,18 @@ namespace PowderCoatingWizard.Module.BusinessObjects
         {
             get => operatorName;
             set => SetPropertyValue(nameof(OperatorName), ref operatorName, value);
+        }
+
+        [ToolTip("Operator object from the line's roster. Selecting one auto-fills OperatorName.")]
+        public Operator Operator
+        {
+            get => @operator;
+            set
+            {
+                SetPropertyValue(nameof(Operator), ref @operator, value);
+                if (value != null && OperatorName != value.Name)
+                    OperatorName = value.Name;
+            }
         }
 
         [Size(-1)]

@@ -1,6 +1,7 @@
 using DevExpress.Persistent.Base;
 using DevExpress.Persistent.BaseImpl;
 using DevExpress.Xpo;
+using PowderCoatingWizard.Module.Attributes;
 using System.ComponentModel;
 
 namespace PowderCoatingWizard.Module.BusinessObjects
@@ -13,6 +14,7 @@ namespace PowderCoatingWizard.Module.BusinessObjects
     [DefaultProperty(nameof(DisplayName))]
     [NavigationItem("Line Configuration")]
     [ImageName("BO_Audit")]
+    [AIQueryable("Quality certification or standard (Qualicoat, GSB, AAMA etc.) applied to a production line. Includes certificate number, issuing body, issue/expiry dates, and status.")]
     public class LineCertification : BaseObject
     {
         public LineCertification(Session session) : base(session) { }

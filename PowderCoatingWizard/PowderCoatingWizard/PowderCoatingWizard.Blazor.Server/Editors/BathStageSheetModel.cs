@@ -62,6 +62,49 @@ namespace PowderCoatingWizard.Blazor.Server.Editors
         /// </summary>
         public Func<Guid> OnNewSession { get; set; }
 
+        /// <summary>
+        /// Returns sessions for the current stage's line that do not yet contain
+        /// measurements for the current stage — candidates for appending.
+        /// </summary>
+        public List<MeasurementSession> GetSessionsMissingStage()
+        {
+            if (_os == null || _stage == null) return [];
+            return BathStageSheetService.GetSessionsMissingStage(_os, _stage);
+        }
+
+        /// <summary>
+        /// Appends empty measurements for the current stage to an existing session
+        /// and adds a placeholder row to the DataTable.
+        /// Returns the session Oid (or Empty on failure).
+        /// </summary>
+        public Guid AppendStageToExistingSession(Guid sessionOid)
+        {
+            if (_os == null || _stage == null) return Guid.Empty;
+
+            var session = _os.GetObjectByKey<MeasurementSession>(sessionOid);
+            if (session == null) return Guid.Empty;
+
+            BathStageSheetService.AppendStageToSession(_os, _stage, session);
+
+            if (SheetData != null)
+            {
+                var existingRow = SheetData.AsEnumerable()
+                    .FirstOrDefault(r => r[BathStageSheetService.ColOid] is Guid g && g == sessionOid);
+
+                if (existingRow == null)
+                {
+                    var row = SheetData.NewRow();
+                    row[BathStageSheetService.ColOid]      = session.Oid;
+                    row[BathStageSheetService.ColDate]     = session.MeasuredOn;
+                    row[BathStageSheetService.ColOperator] = session.OperatorName ?? string.Empty;
+                    row[BathStageSheetService.ColNotes]    = session.Notes ?? string.Empty;
+                    SheetData.Rows.Add(row);
+                }
+            }
+
+            return sessionOid;
+        }
+
         private IObjectSpace _os;
         private LineStage    _stage;
 

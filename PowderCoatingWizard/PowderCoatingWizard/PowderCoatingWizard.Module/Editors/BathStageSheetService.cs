@@ -46,6 +46,60 @@ namespace PowderCoatingWizard.Module.Editors
             return session;
         }
 
+        /// <summary>
+        /// Returns sessions that belong to <paramref name="stage"/>'s line but do NOT yet
+        /// contain any measurement for <paramref name="stage"/>.  These are candidate sessions
+        /// that the operator can "append" the stage's measurements to.
+        /// </summary>
+        public static List<MeasurementSession> GetSessionsMissingStage(IObjectSpace os, LineStage stage)
+        {
+            if (stage.Line == null) return [];
+
+            var lineOid  = stage.Line.Oid;
+            var stageOid = stage.Oid;
+
+            var sessionOidsWithStage = os.GetObjects<ParameterMeasurement>()
+                .Where(m => m.Stage?.Oid == stageOid)
+                .Select(m => m.MeasurementSession?.Oid)
+                .Where(id => id.HasValue)
+                .Select(id => id!.Value)
+                .ToHashSet();
+
+            return os.GetObjects<MeasurementSession>()
+                .Where(s => s.Line?.Oid == lineOid && !sessionOidsWithStage.Contains(s.Oid))
+                .OrderByDescending(s => s.MeasuredOn)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Appends empty <see cref="ParameterMeasurement"/> rows for <paramref name="stage"/> to
+        /// an <paramref name="existingSession"/> that does not yet have measurements for that stage.
+        /// Already-existing stage/parameter combinations are skipped (uniqueness guard).
+        /// Changes are committed before returning.
+        /// </summary>
+        public static void AppendStageToSession(IObjectSpace os, LineStage stage, MeasurementSession existingSession)
+        {
+            var alreadyMeasuredParamOids = os.GetObjects<ParameterMeasurement>()
+                .Where(m => m.MeasurementSession?.Oid == existingSession.Oid && m.Stage?.Oid == stage.Oid)
+                .Select(m => m.Parameter?.Oid)
+                .Where(id => id.HasValue)
+                .Select(id => id!.Value)
+                .ToHashSet();
+
+            foreach (var sp in stage.Parameters)
+            {
+                if (sp.Parameter == null) continue;
+                if (alreadyMeasuredParamOids.Contains(sp.Parameter.Oid)) continue; // uniqueness guard
+
+                var m = os.CreateObject<ParameterMeasurement>();
+                m.MeasurementSession = existingSession;
+                m.Stage              = stage;
+                m.Parameter          = sp.Parameter;
+            }
+
+            os.CommitChanges();
+        }
+
         public static (DataTable Table, List<BathStageColumnMeta> Columns, List<StageCriterion> Criteria, List<StageCalculatedField> CalculatedFields, List<StageExcelTemplate> ExcelTemplates)
                 Build(IObjectSpace objectSpace, LineStage stage,
                     DateTime? dateFrom = null, DateTime? dateTo = null)

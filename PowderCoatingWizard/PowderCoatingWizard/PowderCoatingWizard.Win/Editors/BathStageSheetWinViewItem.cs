@@ -8,6 +8,7 @@ using DevExpress.XtraGrid.Columns;
 using DevExpress.XtraGrid.Views.Grid;
 using PowderCoatingWizard.Module.BusinessObjects;
 using PowderCoatingWizard.Module.Editors;
+using PowderCoatingWizard.Win.Dialogs;
 using System.Data;
 using System.Drawing;
 using System.Windows.Forms;
@@ -102,18 +103,45 @@ namespace PowderCoatingWizard.Win.Editors
             _addingSession = true;
             try
             {
-                // Create session + seed empty measurements for every stage parameter
-                BathStageSheetService.CreateSessionForStage(_os, stage);
+                var candidateSessions = BathStageSheetService.GetSessionsMissingStage(_os, stage);
+                MeasurementSession session;
+
+                if (candidateSessions.Count > 0)
+                {
+                    // Offer choice: new session or append to an existing one
+                    using var dlg = new NewSessionPickerDialog(candidateSessions);
+                    if (dlg.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
+
+                    if (dlg.SelectedSession != null)
+                    {
+                        BathStageSheetService.AppendStageToSession(_os, stage, dlg.SelectedSession);
+                        session = dlg.SelectedSession;
+                    }
+                    else
+                    {
+                        session = BathStageSheetService.CreateSessionForStage(_os, stage);
+                    }
+                }
+                else
+                {
+                    session = BathStageSheetService.CreateSessionForStage(_os, stage);
+                }
 
                 // Reload data manually so we control the flow
                 LoadData();
 
-                // New session is OrderByDescending(MeasuredOn) → it will be row 0
-                if (_gridView.DataRowCount > 0)
+                // Find and focus the row for the session we just created/appended
+                var sessionOid = session.Oid;
+                for (int i = 0; i < _gridView.DataRowCount; i++)
                 {
-                    _gridView.FocusedRowHandle = 0;
-                    _gridView.Focus();
-                    _gridView.ShowEditor();
+                    var rowOid = _gridView.GetRowCellValue(i, BathStageSheetService.ColOid);
+                    if (rowOid is Guid g && g == sessionOid)
+                    {
+                        _gridView.FocusedRowHandle = i;
+                        _gridView.Focus();
+                        _gridView.ShowEditor();
+                        break;
+                    }
                 }
             }
             finally
@@ -366,7 +394,14 @@ namespace PowderCoatingWizard.Win.Editors
             dateEdit.Mask.UseMaskAsDisplayFormat   = true;
             dateCol.ColumnEdit = dateEdit;
 
-            AddColumn(BathStageSheetService.ColOperator, "Operator", width: 120, readOnly: false);
+            var opCol = AddColumn(BathStageSheetService.ColOperator, "Operator", width: 120, readOnly: false);
+            if (stage.Line != null)
+            {
+                var opRepo = new RepositoryItemComboBox { TextEditStyle = DevExpress.XtraEditors.Controls.TextEditStyles.Standard };
+                foreach (var op in stage.Line.Operators.Where(o => o.IsActive).OrderBy(o => o.Name))
+                    opRepo.Items.Add(op.Name);
+                opCol.ColumnEdit = opRepo;
+            }
 
             var notesCol = AddColumn(BathStageSheetService.ColNotes, "Notes", width: 200, readOnly: false);
             notesCol.ColumnEdit = new DevExpress.XtraEditors.Repository.RepositoryItemMemoEdit { AcceptsReturn = false };
