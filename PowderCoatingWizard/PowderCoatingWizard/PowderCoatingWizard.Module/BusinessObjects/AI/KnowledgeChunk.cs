@@ -18,6 +18,7 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
         public KnowledgeChunk(Session session) : base(session) { }
 
         AIDocument _document;
+        AICaseStudy _caseStudy;
         int _chunkIndex;
         string _chunkText;
         string _embeddingJson;
@@ -28,6 +29,17 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
         {
             get => _document;
             set => SetPropertyValue(nameof(Document), ref _document, value);
+        }
+
+        /// <summary>
+        /// Set when this chunk was generated from a <see cref="AICaseStudy"/> rather than an uploaded document.
+        /// Exactly one of <see cref="Document"/> or <see cref="CaseStudy"/> should be non-null.
+        /// </summary>
+        [Association("AICaseStudy-KnowledgeChunks")]
+        public AICaseStudy CaseStudy
+        {
+            get => _caseStudy;
+            set => SetPropertyValue(nameof(CaseStudy), ref _caseStudy, value);
         }
 
         public int ChunkIndex

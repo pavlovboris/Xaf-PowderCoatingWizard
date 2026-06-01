@@ -1,4 +1,4 @@
-using DevExpress.AIIntegration;
+﻿using DevExpress.AIIntegration;
 using DevExpress.AIIntegration.Blazor.Chat;
 using DevExpress.AIIntegration.Blazor.Chat.WebView;
 using DevExpress.AIIntegration.WinForms.Chat;
@@ -11,14 +11,14 @@ using Microsoft.Extensions.AI;
 using PowderCoatingWizard.Module.BusinessObjects;
 using PowderCoatingWizard.Module.BusinessObjects.AI;
 using PowderCoatingWizard.Module.Services.AI;
+using PowderCoatingWizard.Win.Forms;
 using PowderCoatingWizard.Win.Services;
-
 namespace PowderCoatingWizard.Win.Controllers
 {
     /// <summary>
     /// Floating AI assistant window containing the DevExpress AIChatControl.
     /// RagChatClient is registered in AIExtensionsContainerDesktop.Default so the
-    /// control uses it natively — full streaming with thinking indicator and RAG grounding.
+    /// control uses it natively â€” full streaming with thinking indicator and RAG grounding.
     /// The system prompt is injected as a hidden System message after initialization.
     /// </summary>
     public class AIAssistantForm : XtraForm
@@ -31,17 +31,22 @@ namespace PowderCoatingWizard.Win.Controllers
         private readonly Guid? _agentOid;
 
         // RagChatClient wraps the real IChatClient and injects RAG context before every call.
-        // Registered into AIExtensionsContainerDesktop.Default so the AIChatControl uses it
-        // natively — no MessageSent buffering, real streaming + thinking indicator.
         private readonly RagChatClient? _ragClient;
+        // Keep original IChatClient for PromptShaperForm's AI Improve feature.
+        private readonly IChatClient? _chatClient;
+        // Prompt shaper trigger mode loaded from settings.
+        private PromptShaperTriggerMode _promptShaperTrigger = PromptShaperTriggerMode.SlashCommand;
 
         // Saved system prompt reused for context loading
         private string _systemPrompt = string.Empty;
 
-        // Whether we registered the client — tracked so Dispose can unregister.
+        // Whether we registered the client â€” tracked so Dispose can unregister.
         private bool _clientRegistered;
 
-        // Persistent chat session — null means ephemeral (not saved).
+
+        // Status label shown at the bottom -- updated when tools are invoked.
+        private LabelControl _toolStatusLabel = null!;
+        // Persistent chat session â€” null means ephemeral (not saved).
         private AIChatSession? _session;
         // Separate ObjectSpace for session writes to avoid polluting the main _os.
         private readonly IObjectSpace? _sessionOs;
@@ -58,8 +63,9 @@ namespace PowderCoatingWizard.Win.Controllers
             _os = os;
             _osFactory = osFactory;
             _stage = stage;
+            _chatClient = chatClient;
 
-            // Store only the Oid — the caller's object space may be disposed before
+            // Store only the Oid
             // OnChatInitialized runs. We reload the agent from our own _os below.
             _agentOid = agent?.Oid;
             _agent = _agentOid.HasValue ? _os.GetObjectByKey<AIAgent>(_agentOid.Value) : null;
@@ -86,15 +92,24 @@ namespace PowderCoatingWizard.Win.Controllers
                 var settings = _os.FirstOrDefault<Module.BusinessObjects.AI.AIProviderSettings>(s => true);
                 int dbMaxRecords = settings?.DbQueryMaxRecords ?? 50;
                 bool dbQueryEnabled = settings?.DbQueryEnabled ?? true;
+                _promptShaperTrigger = settings?.PromptShaperTrigger ?? PromptShaperTriggerMode.SlashCommand;
 
-                // Build the tool list — always include BathDataTool; add DB query tools when enabled
+                // Determine which tools are enabled for the current agent (null agent = all enabled)
+                bool IsTool(AgentTool tool) => _agent == null || _agent.HasTool(tool);
+
+                // Build the tool list respecting per-agent enablement
                 var toolList = new List<Microsoft.Extensions.AI.AITool>();
 
-                var bathTool = Microsoft.Extensions.AI.AIFunctionFactory.Create(
-                    new BathDataToolService(_os).GetBathData);
-                toolList.Add(bathTool);
+                if (IsTool(AgentTool.BathData))
+                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(new BathDataToolService(_os).GetBathData));
 
-                if (dbQueryEnabled)
+                if (IsTool(AgentTool.Trend))
+                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(new MeasurementTrendToolService(_os).GetMeasurementTrend));
+
+                if (IsTool(AgentTool.ThresholdAlert))
+                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(new ThresholdAlertToolService(_os).GetThresholdAlerts));
+
+                if (dbQueryEnabled && IsTool(AgentTool.DbQuery))
                 {
                     var schema = new SchemaDiscoveryService();
                     var dbQueryService = new DatabaseQueryToolService(_os, schema, dbMaxRecords);
@@ -103,28 +118,54 @@ namespace PowderCoatingWizard.Win.Controllers
                     toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(dbQueryService.QueryEntity, "query_entity"));
                 }
 
-                _ragClient = new RagChatClient(chatClient,
-                    new RagSearchService(osFactory, new EmbeddingService(embeddingGenerator)),
-                    _agentOid,
-                    toolList);
+                // Per-agent model parameters (temperature excluded — not injected to stay compatible with all models)
+                int maxTokens = _agent?.MaxTokens ?? 0;
+                int? tokens = maxTokens > 0 ? maxTokens : null;
+                var tools = toolList.AsReadOnly();
 
-                // Register our RAG-augmented client as the global provider so AIChatControl
-                // picks it up natively with streaming and the thinking indicator.
-                // Unregister any previously registered client first (e.g. from a prior session).
+                // Build pipeline so ConfigureOptions runs before FunctionInvokingChatClient.
+                // FunctionInvokingChatClient must see the injected tools; otherwise OpenAI returns
+                // raw tool_calls to the UI and no local tool invocation happens.
+                // RagChatClient wraps everything above so RAG runs first.
+                IChatClient pipeline = chatClient
+                    .AsBuilder()
+                    .ConfigureOptions(o =>
+                    {
+                        if (tools.Count > 0)
+                        {
+                            o.Tools = o.Tools != null ? [.. o.Tools, .. tools] : [.. tools];
+                            o.ToolMode ??= ChatToolMode.Auto;
+                        }
+                        if (tokens.HasValue && o.MaxOutputTokens == null) o.MaxOutputTokens = tokens;
+                        var toolNames = o.Tools?.Select(t => t is Microsoft.Extensions.AI.AIFunction f ? f.Name : t.GetType().Name).ToList() ?? [];
+                        AILogger.LogEvent("PIPELINE:OPTIONS", $"ConfigureOptions applied — tools=[{string.Join(", ", toolNames)}] maxTokens={o.MaxOutputTokens} toolMode={o.ToolMode}");
+                    })
+                    .UseFunctionInvocation()
+                    .Build();
+                pipeline = new ToolIndicatorChatClient(pipeline, name => SetToolStatus(name), () => SetToolStatus(null));
+
+                _ragClient = new RagChatClient(pipeline,
+                    chatClient,   // raw provider client — for query planning only (no tools injected)
+                    new RagSearchService(osFactory, new EmbeddingService(embeddingGenerator)),
+                    _agentOid);
+
+                // Register the pipeline so AIChatControl picks it up with full streaming + thinking indicator.
                 try { AIExtensionsContainerDesktop.Default.UnregisterChatClient(); } catch { /* none registered */ }
                 AIExtensionsContainerDesktop.Default.RegisterChatClient(_ragClient);
                 _clientRegistered = true;
+                AILogger.LogEvent("INIT", $"AI pipeline registered. Log: {AILogger.GetLogPath()}");
             }
 
             InitializeForm();
         }
 
+
         private void InitializeForm()
         {
             var agentLabel = _agent != null ? $" [{_agent.Name}]" : string.Empty;
             Text = _stage != null
-                ? $"AI Assistant{agentLabel} — {_stage.Name}"
-                : $"AI Assistant{agentLabel} — Powder Coating Wizard";
+                ? $"AI Assistant{agentLabel} - {_stage.Name}"
+                : $"AI Assistant{agentLabel} - Powder Coating Wizard";
             Size = new System.Drawing.Size(900, 700);
             StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
             MinimizeBox = true;
@@ -136,15 +177,37 @@ namespace PowderCoatingWizard.Win.Controllers
                 ShowHeader = DevExpress.Utils.DefaultBoolean.True,
                 HeaderText = "AI Assistant",
                 UseStreaming = DevExpress.Utils.DefaultBoolean.True,
+                FileUploadEnabled = DevExpress.Utils.DefaultBoolean.True,
                 ContentFormat = ResponseContentFormat.Markdown
             };
+            _chat.OptionsFileUpload.FileTypeFilter.AddRange([
+                "text/plain",
+                "application/pdf",
+                "image/png",
+                "image/jpeg",
+                "image/webp",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ]);
+            _chat.OptionsFileUpload.AllowedFileExtensions.AddRange([
+                ".txt",
+                ".pdf",
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".webp",
+                ".docx",
+                ".xlsx"
+            ]);
+            _chat.OptionsFileUpload.MaxFileCount = 5;
+            _chat.OptionsFileUpload.MaxFileSize = 10 * 1024 * 1024;
             _chat.MarkdownConvert += OnMarkdownConvert;
 
             if (!_clientRegistered)
             {
                 _chat.EmptyStateText =
-                    "⚠️ AI is not configured.\n\n" +
-                    "Go to AI → AI Provider Settings and fill in Provider / Endpoint / API Key / Model ID, then restart the application.";
+                    "AI is not configured.\n\n" +
+                    "Go to AI > AI Provider Settings and fill in Provider / Endpoint / API Key / Model ID, then restart the application.";
             }
             else
             {
@@ -152,16 +215,144 @@ namespace PowderCoatingWizard.Win.Controllers
                     ? $"Ready to analyse {_stage.Name}. Ask a question."
                     : "Ready to analyse production line data. Ask a question.";
 
-                // OnChatInitialized injects the domain system prompt; no MessageSent override
-                // needed — streaming is handled natively by the registered RagChatClient.
                 _chat.Initialized += OnChatInitialized;
             }
 
-            // On close, persist the full chat history to the session.
+            // Toolbar row.
+            var toolbar = new System.Windows.Forms.Panel
+            {
+                Dock = System.Windows.Forms.DockStyle.Top,
+                Height = 36,
+                Padding = new System.Windows.Forms.Padding(4, 2, 4, 2)
+            };
+
+            var shapeButton = new SimpleButton
+            {
+                Text = "Shape Prompt",
+                Height = 30,
+                Width = 130,
+                Dock = System.Windows.Forms.DockStyle.Left
+            };
+            shapeButton.Click += (_, _) => OpenPromptShaper(string.Empty);
+
+            var createCaseStudyButton = new SimpleButton
+            {
+                Text = "Create Case Study",
+                Height = 30,
+                Width = 150,
+                Dock = System.Windows.Forms.DockStyle.Left
+            };
+            createCaseStudyButton.Click += (_, _) => CreateCaseStudyFromConversation();
+
+            toolbar.Controls.Add(createCaseStudyButton);
+            toolbar.Controls.Add(shapeButton);
+
             if (_sessionOs != null)
                 FormClosing += OnFormClosing;
+            _toolStatusLabel = new DevExpress.XtraEditors.LabelControl { Dock = System.Windows.Forms.DockStyle.Bottom, Text = string.Empty, AutoSizeMode = DevExpress.XtraEditors.LabelAutoSizeMode.None, Height = 22 };
 
             Controls.Add(_chat);
+            Controls.Add(_toolStatusLabel);
+            Controls.Add(toolbar);
+        }
+
+        // Prompt Shaper
+
+        private void OpenPromptShaper(string initialText)
+        {
+            using var shaper = new PromptShaperForm(initialText, _chatClient);
+            if (shaper.ShowDialog(this) == System.Windows.Forms.DialogResult.OK
+                && !string.IsNullOrWhiteSpace(shaper.FinalPrompt))
+            {
+                _ = _chat.SendMessage(shaper.FinalPrompt, ChatRole.User);
+            }
+        }
+
+        private void CreateCaseStudyFromConversation()
+        {
+            if (_osFactory == null)
+            {
+                XtraMessageBox.Show(
+                    "Cannot create a case study because ObjectSpaceFactory is not available.",
+                    "AI Assistant",
+                    System.Windows.Forms.MessageBoxButtons.OK,
+                    System.Windows.Forms.MessageBoxIcon.Warning);
+                return;
+            }
+
+            var messages = _chat.SaveMessages()?.OfType<BlazorChatMessage>().ToList();
+            var visibleMessages = messages?
+                .Where(m => m.Role != ChatMessageRole.System && !string.IsNullOrWhiteSpace(m.Content))
+                .ToList();
+
+            if (visibleMessages == null || visibleMessages.Count == 0)
+            {
+                XtraMessageBox.Show(
+                    "There are no conversation messages to save as a case study.",
+                    "AI Assistant",
+                    System.Windows.Forms.MessageBoxButtons.OK,
+                    System.Windows.Forms.MessageBoxIcon.Information);
+                return;
+            }
+
+            try
+            {
+                using var caseOs = _osFactory.CreateObjectSpace(typeof(AICaseStudy));
+                var caseStudy = caseOs.CreateObject<AICaseStudy>();
+                caseStudy.Title = BuildCaseStudyTitle(visibleMessages);
+                caseStudy.Tags = "ai chat, draft, case study";
+                caseStudy.Status = CaseStudyStatus.Draft;
+                caseStudy.CreatedAt = DateTime.UtcNow;
+                caseStudy.OccurredOn = DateTime.Today;
+                caseStudy.Stage = _stage != null ? caseOs.GetObjectByKey<LineStage>(_stage.Oid) : null;
+                caseStudy.ProblemDescription = BuildConversationTranscript(visibleMessages);
+                caseStudy.LessonsLearned = "Review and complete this draft case study before approving it for RAG embedding.";
+
+                caseOs.CommitChanges();
+
+                XtraMessageBox.Show(
+                    $"Draft case study created:\n\n{caseStudy.Title}\n\nOpen AI > Case Studies to review, complete, and approve it.",
+                    "AI Assistant",
+                    System.Windows.Forms.MessageBoxButtons.OK,
+                    System.Windows.Forms.MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                DevExpress.Persistent.Base.Tracing.Tracer.LogError(ex);
+                XtraMessageBox.Show(
+                    $"Could not create case study:\n\n{ex.Message}",
+                    "AI Assistant",
+                    System.Windows.Forms.MessageBoxButtons.OK,
+                    System.Windows.Forms.MessageBoxIcon.Error);
+            }
+        }
+
+        private static string BuildCaseStudyTitle(IReadOnlyList<BlazorChatMessage> messages)
+        {
+            var firstUser = messages.FirstOrDefault(m => m.Role == ChatMessageRole.User)?.Content?.Trim();
+            if (string.IsNullOrWhiteSpace(firstUser))
+                return $"AI chat case study - {DateTime.Now:yyyy-MM-dd HH:mm}";
+
+            firstUser = firstUser.ReplaceLineEndings(" ");
+            return firstUser.Length <= 120 ? firstUser : firstUser[..120];
+        }
+
+        private static string BuildConversationTranscript(IEnumerable<BlazorChatMessage> messages)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("Created from AI assistant conversation.");
+            sb.AppendLine();
+            sb.AppendLine("## Conversation Transcript");
+
+            foreach (var message in messages)
+            {
+                var role = message.Role == ChatMessageRole.Assistant ? "Assistant" : "User";
+                sb.AppendLine();
+                sb.AppendLine($"### {role}");
+                sb.AppendLine(message.Content?.Trim());
+            }
+
+            return sb.ToString().TrimEnd();
         }
 
         private static void OnMarkdownConvert(object? sender, AIChatControlMarkdownConvertEventArgs e)
@@ -255,11 +446,11 @@ namespace PowderCoatingWizard.Win.Controllers
                 else
                     sb.AppendLine(DomainAIContextBuilder.BuildSystemPrompt());
 
-                // Formatting instruction — the chat control renders Markdown natively.
+                // Formatting instruction â€” the chat control renders Markdown natively.
                 sb.AppendLine();
                 sb.AppendLine("Always format your responses using Markdown: use **bold** for important values, `code` for parameter names, ## headings for sections, bullet lists for recommendations, and tables where appropriate.");
 
-                // 2. Standards / SOPs — scoped to agent or global
+                // 2. Standards / SOPs â€” scoped to agent or global
                 if (_osFactory != null)
                 {
                     using var instructionOs = _osFactory.CreateObjectSpace(typeof(AIInstructionSet));
@@ -275,7 +466,7 @@ namespace PowderCoatingWizard.Win.Controllers
                     }
                 }
 
-                // 3. Live database data — HIGHEST PRIORITY
+                // 3. Live database data â€” HIGHEST PRIORITY
                 if (_stage != null)
                 {
                     sb.AppendLine();
@@ -307,7 +498,7 @@ namespace PowderCoatingWizard.Win.Controllers
                         };
                         seedMessages.Add(new BlazorChatMessage(role, m.Content ?? string.Empty));
                     }
-                    Text = $"{Text} — (Restored)";
+                    Text = $"{Text} â€” (Restored)";
                 }
 
                 _chat.LoadMessages(seedMessages.ToArray());
@@ -322,6 +513,9 @@ namespace PowderCoatingWizard.Win.Controllers
                     System.Windows.Forms.MessageBoxIcon.Warning);
             }
         }
+
+
+        private void SetToolStatus(string? toolName) { if (_toolStatusLabel == null) return; if (InvokeRequired) { Invoke(() => SetToolStatus(toolName)); return; } _toolStatusLabel.Text = toolName != null ? $"Working: {toolName}..." : string.Empty; }
 
         protected override void Dispose(bool disposing)
         {

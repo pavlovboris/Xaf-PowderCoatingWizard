@@ -7,6 +7,19 @@ using System.ComponentModel;
 
 namespace PowderCoatingWizard.Module.BusinessObjects.AI
 {
+    /// <summary>
+    /// Determines when the Prompt Shaper dialog is triggered in the AI Assistant.
+    /// </summary>
+    public enum PromptShaperTriggerMode
+    {
+        /// <summary>Prompt Shaper is never shown automatically; user opens it manually.</summary>
+        Off = 0,
+        /// <summary>Prompt Shaper is shown only when the user types /shape as their message.</summary>
+        SlashCommand = 1,
+        /// <summary>Prompt Shaper is shown before every message.</summary>
+        Always = 2
+    }
+
     [DefaultClassOptions]
     [NavigationItem("AI")]
     [ImageName("BO_Scheduler_Resource")]
@@ -29,9 +42,17 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
         string _embeddingModelId;
         bool _isEnabled;
         int _ragTopK = 5;
-        float _ragMinScore = 0.4f;
-        bool _dbQueryEnabled = true;
-        int _dbQueryMaxRecords = 50;
+            float _ragMinScore = 0.4f;
+            int _ragCandidatePool = 15;
+            bool _ragRerankerEnabled = true;
+            int _ragMaxSubqueries = 4;
+            bool _dbQueryEnabled = true;
+                int _dbQueryMaxRecords = 50;
+                PromptShaperTriggerMode _promptShaperTrigger = PromptShaperTriggerMode.SlashCommand;
+                int _plannerDecomposeMaxTokens = 300;
+                float _plannerDecomposeTemperature = 0.2f;
+                int _plannerHyDEMaxTokens = 200;
+                float _plannerHyDETemperature = 0.3f;
 
         [Size(200)]
         public string DisplayName
@@ -124,6 +145,47 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
         }
 
         /// <summary>
+        /// Number of candidate chunks retrieved by embedding similarity before reranking.
+        /// Should be larger than RagTopK (default 15). Reranker then selects the best RagTopK.
+        /// </summary>
+        [ModelDefault("DisplayFormat", "{0}")]
+        public int RagCandidatePool
+        {
+            get => _ragCandidatePool;
+            set => SetPropertyValue(nameof(RagCandidatePool), ref _ragCandidatePool, value);
+        }
+
+        /// <summary>
+        /// When enabled, an LLM reranker scores all candidate chunks and selects the best RagTopK.
+        /// Produces significantly better retrieval quality at the cost of one extra LLM call.
+        /// </summary>
+        public bool RagRerankerEnabled
+        {
+            get => _ragRerankerEnabled;
+            set => SetPropertyValue(nameof(RagRerankerEnabled), ref _ragRerankerEnabled, value);
+        }
+
+        /// <summary>
+        /// Maximum number of focused subqueries the query planner generates for complex questions.
+        /// More subqueries = higher recall at the cost of extra embedding calls (default 4).
+        /// </summary>
+        [ModelDefault("DisplayFormat", "{0}")]
+        public int RagMaxSubqueries
+        {
+            get => _ragMaxSubqueries;
+            set => SetPropertyValue(nameof(RagMaxSubqueries), ref _ragMaxSubqueries, value);
+        }
+
+        /// <summary>
+        /// Controls when the Prompt Shaper dialog is shown before sending a message.
+        /// </summary>
+        public PromptShaperTriggerMode PromptShaperTrigger
+        {
+            get => _promptShaperTrigger;
+            set => SetPropertyValue(nameof(PromptShaperTrigger), ref _promptShaperTrigger, value);
+        }
+
+        /// <summary>
         /// Enables or disables the AI database query tools (list_entities, describe_entity, query_entity).
         /// </summary>
         public bool DbQueryEnabled
@@ -141,6 +203,50 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
         {
             get => _dbQueryMaxRecords;
             set => SetPropertyValue(nameof(DbQueryMaxRecords), ref _dbQueryMaxRecords, value);
+        }
+
+        // ── Query Planner tuning ───────────────────────────────────────────────
+
+        /// <summary>
+        /// Maximum output tokens for the Decompose LLM call (complex query → subqueries).
+        /// Default 300.
+        /// </summary>
+        [ModelDefault("DisplayFormat", "{0}")]
+        public int PlannerDecomposeMaxTokens
+        {
+            get => _plannerDecomposeMaxTokens;
+            set => SetPropertyValue(nameof(PlannerDecomposeMaxTokens), ref _plannerDecomposeMaxTokens, value);
+        }
+
+        /// <summary>
+        /// Temperature for the Decompose LLM call. Lower = more deterministic. Default 0.2.
+        /// </summary>
+        [ModelDefault("DisplayFormat", "{0:F2}")]
+        public float PlannerDecomposeTemperature
+        {
+            get => _plannerDecomposeTemperature;
+            set => SetPropertyValue(nameof(PlannerDecomposeTemperature), ref _plannerDecomposeTemperature, value);
+        }
+
+        /// <summary>
+        /// Maximum output tokens for the HyDE LLM call (simple query → hypothetical answer paragraph).
+        /// Default 200.
+        /// </summary>
+        [ModelDefault("DisplayFormat", "{0}")]
+        public int PlannerHyDEMaxTokens
+        {
+            get => _plannerHyDEMaxTokens;
+            set => SetPropertyValue(nameof(PlannerHyDEMaxTokens), ref _plannerHyDEMaxTokens, value);
+        }
+
+        /// <summary>
+        /// Temperature for the HyDE LLM call. Slightly higher than Decompose to allow creative elaboration. Default 0.3.
+        /// </summary>
+        [ModelDefault("DisplayFormat", "{0:F2}")]
+        public float PlannerHyDETemperature
+        {
+            get => _plannerHyDETemperature;
+            set => SetPropertyValue(nameof(PlannerHyDETemperature), ref _plannerHyDETemperature, value);
         }
 
         // ── Non-persistent helper ──────────────────────────────────────────────

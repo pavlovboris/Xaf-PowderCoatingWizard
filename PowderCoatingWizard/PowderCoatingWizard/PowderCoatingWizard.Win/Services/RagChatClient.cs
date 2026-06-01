@@ -1,198 +1,121 @@
+﻿using DevExpress.Persistent.Base;
 using Microsoft.Extensions.AI;
 using PowderCoatingWizard.Module.Services.AI;
 using System.Runtime.CompilerServices;
+using System.Threading.Channels;
 
 namespace PowderCoatingWizard.Win.Services
 {
     /// <summary>
-    /// IChatClient decorator that intercepts every request and:
-    /// 1. Prepends a RAG context system message built from the user's last question.
-    /// 2. Registers the BathDataTool so the LLM can dynamically query live bath data.
-    /// 3. Handles the tool-call execution loop so the model never gets an unanswered tool_call_id.
-    /// Streaming is fully forwarded to the inner client so the AIChatControl
-    /// typing indicator and token-by-token rendering work natively.
+    /// IChatClient decorator that prepends a RAG context system message before every user turn.
+    /// Inherits <see cref="DelegatingChatClient"/> so that <see cref="GetService"/> correctly
+    /// returns <c>this</c> for the outer wrapper type. DevExpress <c>AIChatControl</c> probes
+    /// <see cref="IChatClient.GetService"/> to discover streaming capabilities; a plain
+    /// <c>IChatClient</c> implementation that delegates straight to <c>_inner</c> exposes the
+    /// inner LLM client directly and bypasses the RAG augmentation for the streaming path.
+    ///
+    /// STREAMING / THINKING INDICATOR STRATEGY
+    /// AIChatControl shows the thinking indicator only while GetStreamingResponseAsync is actively
+    /// yielding. If we await RAG preprocessing (2-3 LLM calls) BEFORE the first yield the control
+    /// sees a silent gap and never shows the indicator. To fix this we run RAG in a background Task
+    /// and bridge results through a Channel so the thinking indicator appears immediately while RAG
+    /// works in the background. Once RAG finishes we restart the inner stream with augmented messages.
     /// </summary>
-    public sealed class RagChatClient : IChatClient
+    public sealed class RagChatClient : DelegatingChatClient
     {
-        private readonly IChatClient _inner;
+        // Raw LLM provider client — used only for query planning (HyDE / decompose / classify).
+        // Must NOT go through FunctionInvokingChatClient or ConfigureOptions, because those
+        // layers inject tools into every ChatOptions, which causes FunctionInvokingChatClient
+        // to attempt tool calls during RAG preprocessing and blocks / corrupts the pipeline.
+        private readonly IChatClient _plannerClient;
         private readonly RagSearchService _ragSearch;
         private readonly Guid? _agentOid;
-        private readonly IReadOnlyList<AITool> _tools;
 
-        public RagChatClient(IChatClient inner, RagSearchService ragSearch, Guid? agentOid,
-            IReadOnlyList<AITool>? tools = null)
+        public RagChatClient(IChatClient inner, IChatClient plannerClient, RagSearchService ragSearch, Guid? agentOid)
+            : base(inner)
         {
-            _inner = inner;
+            _plannerClient = plannerClient;
             _ragSearch = ragSearch;
             _agentOid = agentOid;
-            _tools = tools ?? [];
         }
 
-        public async Task<ChatResponse> GetResponseAsync(
+        public override async Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
             CancellationToken cancellationToken = default)
         {
-            var augmented = await AugmentWithRagAsync(messages, cancellationToken);
-            return await RunWithToolLoopAsync(augmented, MergeOptions(options), cancellationToken);
+            AILogger.LogEvent("RAG", "GetResponseAsync called");
+            AILogger.LogMessages("RAG:IN", messages);
+            AILogger.LogOptions("RAG:OPTIONS", options);
+            try
+            {
+                var augmented = await AugmentWithRagAsync(messages, cancellationToken);
+                AILogger.LogMessages("RAG:AUGMENTED", augmented);
+                var response = await base.GetResponseAsync(augmented, options, cancellationToken);
+                AILogger.LogEvent("RAG", $"GetResponseAsync completed — {response.Messages.Count} response message(s)");
+                return response;
+            }
+            catch (Exception ex)
+            {
+                AILogger.LogError("RAG", ex);
+                Tracing.Tracer.LogError(ex);
+                throw;
+            }
         }
 
-        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+        public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            var augmented = await AugmentWithRagAsync(messages, cancellationToken);
-            var mergedOptions = MergeOptions(options);
+            // Run RAG augmentation in a background task so the Channel starts filling immediately.
+            // This lets the caller (AIChatControl) enter the await-foreach loop right away, which
+            // is what triggers the thinking indicator — the indicator disappears the moment the
+            // enumerator returns without yielding anything.
+            var channel = Channel.CreateUnbounded<ChatResponseUpdate>(
+                new UnboundedChannelOptions { SingleWriter = true, SingleReader = true });
 
-            // Execute any tool-call rounds synchronously (non-streaming) first,
-            // then stream only the final text response to the UI.
-            var (finalMessages, finalOptions) = await ExecuteToolRoundsAsync(
-                augmented, mergedOptions, cancellationToken);
+            AILogger.LogEvent("RAG", "GetStreamingResponseAsync called");
+            AILogger.LogMessages("RAG:IN", messages);
+            AILogger.LogOptions("RAG:OPTIONS", options);
 
-            await foreach (var update in _inner.GetStreamingResponseAsync(
-                finalMessages, finalOptions, cancellationToken))
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var augmented = await AugmentWithRagAsync(messages, cancellationToken);
+                    AILogger.LogMessages("RAG:AUGMENTED", augmented);
+                    AILogger.LogEvent("RAG", "Starting inner streaming call");
+                    int updateCount = 0;
+                    await foreach (var update in base.GetStreamingResponseAsync(augmented, options, cancellationToken))
+                    {
+                        updateCount++;
+                        // Log tool-call and finish updates so we can see what the model is doing.
+                        if (update.Contents.OfType<FunctionCallContent>().Any())
+                        {
+                            var calls = string.Join(", ", update.Contents.OfType<FunctionCallContent>().Select(f => f.Name));
+                            AILogger.LogEvent("RAG:STREAM", $"update[{updateCount}] TOOL_CALL: {calls}");
+                        }
+                        else if (update.FinishReason != null)
+                        {
+                            AILogger.LogEvent("RAG:STREAM", $"update[{updateCount}] FINISH reason={update.FinishReason}");
+                        }
+                        await channel.Writer.WriteAsync(update, cancellationToken);
+                    }
+                    AILogger.LogEvent("RAG", $"Inner streaming complete — {updateCount} update(s) forwarded");
+                }
+                catch (Exception ex)
+                {
+                    AILogger.LogError("RAG", ex);
+                    Tracing.Tracer.LogError(ex);
+                    channel.Writer.TryComplete(ex);
+                    return;
+                }
+                channel.Writer.TryComplete();
+            }, cancellationToken);
+
+            await foreach (var update in channel.Reader.ReadAllAsync(cancellationToken))
                 yield return update;
-        }
-
-        public object? GetService(Type serviceType, object? serviceKey = null)
-            => _inner.GetService(serviceType, serviceKey);
-
-        public void Dispose() => _inner.Dispose();
-
-        // ── Tool call loop ───────────────────────────────────────────────────
-
-        /// <summary>
-        /// Runs non-streaming rounds until there are no more tool calls, then returns
-        /// the final ChatResponse. Used by GetResponseAsync.
-        /// </summary>
-        private async Task<ChatResponse> RunWithToolLoopAsync(
-            IList<ChatMessage> messages,
-            ChatOptions? options,
-            CancellationToken ct)
-        {
-            var (finalMessages, finalOptions) = await ExecuteToolRoundsAsync(messages, options, ct);
-            return await _inner.GetResponseAsync(finalMessages, finalOptions, ct);
-        }
-
-        /// <summary>
-        /// Executes all tool-call rounds (without streaming) and returns the message list
-        /// and options ready for the final response call. If no tools are registered, or the
-        /// model does not invoke any tools, returns the inputs unchanged.
-        /// </summary>
-        private async Task<(IList<ChatMessage> messages, ChatOptions? options)> ExecuteToolRoundsAsync(
-            IList<ChatMessage> messages,
-            ChatOptions? options,
-            CancellationToken ct)
-        {
-            if (_tools.Count == 0)
-                return (messages, options);
-
-            const int maxRounds = 5; // safety cap — prevent infinite loops
-            var current = messages.ToList();
-
-            for (int round = 0; round < maxRounds; round++)
-            {
-                var response = await _inner.GetResponseAsync(current, options, ct);
-
-                // Collect tool calls from the response
-                var toolCalls = response.Messages
-                    .SelectMany(m => m.Contents.OfType<FunctionCallContent>())
-                    .ToList();
-
-                if (toolCalls.Count == 0)
-                {
-                    // No tool calls — add the assistant messages and stop
-                    current.AddRange(response.Messages);
-                    break;
-                }
-
-                // Add the assistant message(s) that contain the tool_calls
-                current.AddRange(response.Messages);
-
-                // Execute each tool call and add a tool-result message for each
-                foreach (var call in toolCalls)
-                {
-                    string result;
-                    try
-                    {
-                        result = await InvokeToolAsync(call, ct);
-                    }
-                    catch (Exception ex)
-                    {
-                        result = $"Tool error: {ex.Message}";
-                    }
-
-                    var toolResultMessage = new ChatMessage(ChatRole.Tool,
-                    [
-                        new FunctionResultContent(call.CallId, result)
-                    ]);
-                    current.Add(toolResultMessage);
-                }
-
-                // Continue — model may want to call more tools or produce the final answer
-            }
-
-            // For the final streaming/non-streaming call we do NOT include Tools in options
-            // so the model produces a plain text answer without trying to call more tools.
-            var finalOptions = options != null
-                ? new ChatOptions
-                {
-                    Temperature = options.Temperature,
-                    MaxOutputTokens = options.MaxOutputTokens,
-                    TopP = options.TopP,
-                    FrequencyPenalty = options.FrequencyPenalty,
-                    PresencePenalty = options.PresencePenalty,
-                    StopSequences = options.StopSequences,
-                    ModelId = options.ModelId
-                    // Tools intentionally omitted
-                }
-                : null;
-
-            return (current, finalOptions);
-        }
-
-        /// <summary>Dispatches a single tool call to the matching registered AIFunction.</summary>
-        private async Task<string> InvokeToolAsync(FunctionCallContent call, CancellationToken ct)
-        {
-            var fn = _tools.OfType<AIFunction>().FirstOrDefault(f => f.Name == call.Name);
-            if (fn != null)
-            {
-                AIFunctionArguments? args = call.Arguments != null
-                    ? new AIFunctionArguments(call.Arguments)
-                    : null;
-                var result = await fn.InvokeAsync(args, ct);
-                return result?.ToString() ?? string.Empty;
-            }
-            return $"Unknown tool: {call.Name}";
-        }
-
-        // ── ChatOptions merge ────────────────────────────────────────────────
-
-        private ChatOptions? MergeOptions(ChatOptions? options)
-        {
-            if (_tools.Count == 0) return options;
-
-            return options != null
-                ? new ChatOptions
-                {
-                    Temperature = options.Temperature,
-                    MaxOutputTokens = options.MaxOutputTokens,
-                    TopP = options.TopP,
-                    FrequencyPenalty = options.FrequencyPenalty,
-                    PresencePenalty = options.PresencePenalty,
-                    StopSequences = options.StopSequences,
-                    ModelId = options.ModelId,
-                    Tools = options.Tools != null
-                        ? [.. options.Tools, .. _tools]
-                        : [.. _tools],
-                    ToolMode = options.ToolMode ?? ChatToolMode.Auto
-                }
-                : new ChatOptions
-                {
-                    Tools = [.. _tools],
-                    ToolMode = ChatToolMode.Auto
-                };
         }
 
         // ── RAG augmentation ─────────────────────────────────────────────────
@@ -201,39 +124,140 @@ namespace PowderCoatingWizard.Win.Services
             IEnumerable<ChatMessage> messages,
             CancellationToken ct)
         {
-            var list = messages.ToList();
+            var rawList = messages.ToList();
+            AILogger.LogEvent("RAG:SANITIZE", $"Before sanitize: {rawList.Count} message(s)");
+            var list = SanitizeToolCallHistory(rawList);
+            list = SanitizeHistory(list);
+            if (list.Count != rawList.Count)
+                AILogger.LogEvent("RAG:SANITIZE", $"After full sanitize: {rawList.Count} → {list.Count} message(s)");
 
             var lastUser = list.LastOrDefault(m => m.Role == ChatRole.User);
-            if (lastUser == null) return list;
+            if (lastUser == null) { AILogger.LogEvent("RAG", "No user message found — skipping RAG"); return list; }
 
             var userText = string.Concat(lastUser.Contents.OfType<TextContent>().Select(t => t.Text));
-            if (string.IsNullOrWhiteSpace(userText)) return list;
+            if (string.IsNullOrWhiteSpace(userText)) { AILogger.LogEvent("RAG", "User message is empty — skipping RAG"); return list; }
+
+            AILogger.LogEvent("RAG", $"Searching RAG for: {userText[..Math.Min(120, userText.Length)]}");
 
             IReadOnlyList<string> chunks;
             try
             {
-                chunks = await _ragSearch.SearchAsync(userText, agentOid: _agentOid, ct: ct);
+                // Use the raw provider client (no tools, no function-invoking middleware) for
+                // query planning so that classify / HyDE / decompose calls are plain LLM calls.
+                chunks = await _ragSearch.SearchAsync(userText, agentOid: _agentOid, chatClient: _plannerClient, ct: ct);
             }
-            catch
+            catch (Exception ex)
             {
-                return list; // RAG failure is non-fatal — fall back to plain chat
+                AILogger.LogError("RAG:SEARCH", ex);
+                return list; // RAG failure is non-fatal
             }
 
+            AILogger.LogEvent("RAG", $"RAG returned {chunks.Count} chunk(s)");
             if (chunks.Count == 0) return list;
 
-            var ragSb = new System.Text.StringBuilder();
-            ragSb.AppendLine("## Relevant Knowledge Base Excerpts");
-            ragSb.AppendLine("The following excerpts from uploaded documents are relevant to the current question.");
-            ragSb.AppendLine("Prioritise this information when formulating your answer.");
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("## Relevant Knowledge Base Excerpts");
+            sb.AppendLine("The following excerpts from uploaded documents are relevant to the current question.");
+            sb.AppendLine("Prioritise this information when formulating your answer.");
             foreach (var chunk in chunks)
             {
-                ragSb.AppendLine();
-                ragSb.AppendLine(chunk);
+                sb.AppendLine();
+                sb.AppendLine(chunk);
             }
 
             int insertAt = list.LastIndexOf(lastUser);
-            list.Insert(insertAt, new ChatMessage(ChatRole.System, ragSb.ToString()));
+            list.Insert(insertAt, new ChatMessage(ChatRole.System, sb.ToString()));
             return list;
+        }
+
+        /// <summary>
+        /// Removes assistant messages that contain tool_calls but are not immediately followed
+        /// by the corresponding tool-role response messages. OpenAI rejects such sequences with
+        /// HTTP 400. This can happen when AIChatControl does not persist the full tool exchange
+        /// in its conversation history across turns.
+        /// </summary>
+        /// <summary>
+        /// Removes messages that would cause an OpenAI HTTP 400:
+        /// - User messages whose text is the AIChatControl error sentinel
+        ///   "Something went wrong. Please try again in a few moments."
+        ///   (these are injected by DevExpress into the history after a failed turn).
+        /// - Empty assistant messages (blank content with no tool calls).
+        /// Both patterns corrupt the conversation history and confuse the model.
+        /// </summary>
+        private static List<ChatMessage> SanitizeHistory(List<ChatMessage> messages)
+        {
+            const string errorSentinel = "Something went wrong. Please try again in a few moments.";
+
+            var result = new List<ChatMessage>(messages.Count);
+            for (int i = 0; i < messages.Count; i++)
+            {
+                var msg = messages[i];
+
+                // Drop AIChatControl error sentinel user messages.
+                if (msg.Role == ChatRole.User)
+                {
+                    var text = string.Concat(msg.Contents.OfType<TextContent>().Select(t => t.Text)).Trim();
+                    if (text == errorSentinel)
+                    {
+                        AILogger.LogEvent("RAG:SANITIZE", $"Dropping error-sentinel user message at [{i}]");
+                        continue;
+                    }
+                }
+
+                // Drop empty assistant messages (no text, no tool calls).
+                if (msg.Role == ChatRole.Assistant)
+                {
+                    var text = string.Concat(msg.Contents.OfType<TextContent>().Select(t => t.Text)).Trim();
+                    bool hasToolCalls = msg.Contents.OfType<FunctionCallContent>().Any();
+                    if (string.IsNullOrEmpty(text) && !hasToolCalls)
+                    {
+                        AILogger.LogEvent("RAG:SANITIZE", $"Dropping empty assistant message at [{i}]");
+                        continue;
+                    }
+                }
+
+                result.Add(msg);
+            }
+            return result;
+        }
+
+        private static List<ChatMessage> SanitizeToolCallHistory(List<ChatMessage> messages)
+        {
+            var result = new List<ChatMessage>(messages.Count);
+            for (int i = 0; i < messages.Count; i++)
+            {
+                var msg = messages[i];
+                if (msg.Role == ChatRole.Assistant)
+                {
+                    bool hasFunctionCall = msg.Contents.OfType<FunctionCallContent>().Any();
+                    if (hasFunctionCall)
+                    {
+                        var callIds = msg.Contents.OfType<FunctionCallContent>()
+                            .Select(f => f.CallId)
+                            .Where(id => id != null)
+                            .ToHashSet();
+
+                        int j = i + 1;
+                        var respondedIds = new HashSet<string?>();
+                        while (j < messages.Count && messages[j].Role == ChatRole.Tool)
+                        {
+                            foreach (var fc in messages[j].Contents.OfType<FunctionResultContent>())
+                                respondedIds.Add(fc.CallId);
+                            j++;
+                        }
+
+                        if (callIds.Any(id => !respondedIds.Contains(id)))
+                        {
+                            var missing = string.Join(", ", callIds.Where(id => !respondedIds.Contains(id)));
+                            AILogger.LogEvent("RAG:SANITIZE", $"Dropping orphaned tool_call at [{i}], missing responses for: {missing}");
+                            i = j - 1;
+                            continue;
+                        }
+                    }
+                }
+                result.Add(msg);
+            }
+            return result;
         }
     }
 }

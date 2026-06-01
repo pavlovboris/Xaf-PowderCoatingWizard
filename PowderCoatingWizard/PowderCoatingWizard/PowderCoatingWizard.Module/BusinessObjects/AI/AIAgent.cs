@@ -6,6 +6,22 @@ using System.ComponentModel;
 namespace PowderCoatingWizard.Module.BusinessObjects.AI
 {
     /// <summary>
+    /// Flags enum controlling which AI tools are available to an agent.
+    /// Individual values are stored as <see cref="AIAgentTool"/> rows associated with the agent.
+    /// </summary>
+    [Flags]
+    public enum AgentTool
+    {
+        [Description("Live bath parameter readings for any stage")]
+        BathData       = 1,
+        [Description("Historical measurement trend analysis (avg, min, max, direction)")]
+        Trend          = 2,
+        [Description("Prioritised list of parameters currently outside threshold limits")]
+        ThresholdAlert = 4,
+        [Description("General database query tools (list / describe / query entities)")]
+        DbQuery        = 8,
+    }
+    /// <summary>
     /// A named AI agent profile that groups a specific set of instructions
     /// and optionally restricts which documents are visible in RAG search.
     /// When no documents are linked, the agent can search all documents.
@@ -56,6 +72,56 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
         {
             get => _isActive;
             set => SetPropertyValue(nameof(IsActive), ref _isActive, value);
+        }
+
+        // ── Model parameters ──────────────────────────────────────────────────
+
+        float _temperature = 0.7f;
+        int _maxTokens;
+
+        /// <summary>
+        /// Sampling temperature for this agent (0.0 = deterministic, 1.0 = creative).
+        /// Defaults to 0.7. Leave at 0 to use the model default.
+        /// </summary>
+        [ToolTip("Sampling temperature: 0.0 = deterministic / factual, 1.0 = creative. Default is 0.7.")]
+        public float Temperature
+        {
+            get => _temperature;
+            set => SetPropertyValue(nameof(Temperature), ref _temperature, value);
+        }
+
+        /// <summary>
+        /// Maximum tokens the model may generate per response.
+        /// Leave at 0 to use the model's default limit.
+        /// </summary>
+        [ToolTip("Max tokens per response. Set 0 to use the provider default.")]
+        public int MaxTokens
+        {
+            get => _maxTokens;
+            set => SetPropertyValue(nameof(MaxTokens), ref _maxTokens, value);
+        }
+
+        // ── Tool enablement ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Tools enabled for this agent. Add or remove <see cref="AIAgentTool"/> rows to control
+        /// which tools the agent may invoke. An empty collection means ALL tools are enabled.
+        /// </summary>
+        [Association("AIAgent-EnabledTools")]
+        [Aggregated]
+        public XPCollection<AIAgentTool> EnabledTools => GetCollection<AIAgentTool>(nameof(EnabledTools));
+
+        /// <summary>
+        /// Returns true when the given tool is in <see cref="EnabledTools"/>,
+        /// OR when the collection is empty (= no restriction, all tools allowed).
+        /// </summary>
+        public bool HasTool(AgentTool tool)
+        {
+            var col = EnabledTools;
+            if (col.Count == 0) return true;
+            foreach (var t in col)
+                if (t.ToolName == tool) return true;
+            return false;
         }
 
         // ── Instruction sets assigned to this agent ───────────────────────────
