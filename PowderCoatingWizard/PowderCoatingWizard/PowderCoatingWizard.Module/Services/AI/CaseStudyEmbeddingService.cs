@@ -38,9 +38,8 @@ namespace PowderCoatingWizard.Module.Services.AI
 
             string fullText = caseStudy.BuildEmbeddingText();
 
-            // Split into chunks of ~1000 chars with ~100-char overlap so context isn't lost at boundaries.
-            var chunks = SplitIntoChunks(fullText, chunkSize: 1000, overlap: 100);
-            var texts = chunks.ToList();
+            var sourceLabel = BuildSourceLabel(caseStudy);
+            var texts = SemanticChunkingService.CreateChunks(fullText, sourceLabel, targetSize: 1200, overlapSize: 180).ToList();
 
             // Batch-embed all chunks in one API call
             float[][]? vectors = await _embedding.EmbedBatchAsync(texts, ct);
@@ -71,40 +70,15 @@ namespace PowderCoatingWizard.Module.Services.AI
 
             caseStudy.IsEmbedded = false;
         }
-
-        // ── Text splitting ────────────────────────────────────────────────────
-
-        private static IEnumerable<string> SplitIntoChunks(string text, int chunkSize, int overlap)
+        private static string BuildSourceLabel(AICaseStudy caseStudy)
         {
-            if (string.IsNullOrWhiteSpace(text)) yield break;
+            var title = !string.IsNullOrWhiteSpace(caseStudy.Title)
+                ? caseStudy.Title.Trim()
+                : "Case Study";
 
-            // Prefer paragraph breaks; fall back to character boundary.
-            var paragraphs = text.Split(["\n\n"], StringSplitOptions.RemoveEmptyEntries);
-
-            var buffer = new System.Text.StringBuilder();
-
-            foreach (var para in paragraphs)
-            {
-                // If adding this paragraph would exceed chunkSize, flush current buffer first.
-                if (buffer.Length > 0 && buffer.Length + para.Length + 2 > chunkSize)
-                {
-                    string chunk = buffer.ToString().Trim();
-                    if (chunk.Length > 0) yield return chunk;
-
-                    // Keep the overlap tail for context continuity.
-                    string tail = chunk.Length > overlap ? chunk[^overlap..] : chunk;
-                    buffer.Clear();
-                    buffer.AppendLine(tail);
-                }
-
-                buffer.AppendLine(para);
-            }
-
-            if (buffer.Length > 0)
-            {
-                string last = buffer.ToString().Trim();
-                if (last.Length > 0) yield return last;
-            }
+            return !string.IsNullOrWhiteSpace(caseStudy.Tags)
+                ? $"Case Study: {title}. Tags: {caseStudy.Tags.Trim()}"
+                : $"Case Study: {title}";
         }
     }
 }

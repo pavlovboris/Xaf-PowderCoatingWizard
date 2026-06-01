@@ -1,5 +1,6 @@
 using DevExpress.ExpressApp;
 using DevExpress.ExpressApp.Actions;
+using DevExpress.ExpressApp.MultiTenancy;
 using DevExpress.ExpressApp.Win;
 using DevExpress.Persistent.Base;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,6 +8,7 @@ using PowderCoatingWizard.Module.BusinessObjects;
 using PowderCoatingWizard.Module.BusinessObjects.AI;
 using PowderCoatingWizard.Module.Services.AI;
 using PowderCoatingWizard.Win.Forms;
+using System.Configuration;
 
 namespace PowderCoatingWizard.Win.Controllers
 {
@@ -89,7 +91,10 @@ namespace PowderCoatingWizard.Win.Controllers
                     selectedSession = os.GetObjectByKey<AIChatSession>(sessionPicker.SelectedSession.Oid);
             }
 
-            var form = new AIAssistantForm(chatClient, embGen, os, osFactory, currentStage, selectedAgent, selectedSession);
+            var sqlConnectionString = sp?.GetService<IConnectionStringProvider>()?.GetConnectionString()
+                ?? ConfigurationManager.ConnectionStrings["ConnectionString"]?.ConnectionString
+                ?? Application.ConnectionString;
+            var form = new AIAssistantForm(chatClient, embGen, os, osFactory, currentStage, selectedAgent, selectedSession, sqlConnectionString);
             form.Show();
         }
     }

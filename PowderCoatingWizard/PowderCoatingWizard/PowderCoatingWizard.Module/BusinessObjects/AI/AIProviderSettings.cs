@@ -53,6 +53,9 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
                 float _plannerDecomposeTemperature = 0.2f;
                 int _plannerHyDEMaxTokens = 200;
                 float _plannerHyDETemperature = 0.3f;
+                bool _openAIVectorStoreEnabled;
+                string _openAIVectorStoreId;
+                int _openAIVectorStoreMaxResults = 8;
 
         [Size(200)]
         public string DisplayName
@@ -247,6 +250,34 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
         {
             get => _plannerHyDETemperature;
             set => SetPropertyValue(nameof(PlannerHyDETemperature), ref _plannerHyDETemperature, value);
+        }
+
+        // ── OpenAI Vector Store ───────────────────────────────────────────────
+
+        /// <summary>
+        /// Enables hybrid retrieval from an OpenAI Vector Store in addition to the local KnowledgeChunk index.
+        /// Only used when ProviderType is OpenAI and OpenAIVectorStoreId is set.
+        /// </summary>
+        public bool OpenAIVectorStoreEnabled
+        {
+            get => _openAIVectorStoreEnabled;
+            set => SetPropertyValue(nameof(OpenAIVectorStoreEnabled), ref _openAIVectorStoreEnabled, value);
+        }
+
+        /// <summary>OpenAI vector store id, for example vs_abc123.</summary>
+        [Size(200)]
+        public string OpenAIVectorStoreId
+        {
+            get => _openAIVectorStoreId;
+            set => SetPropertyValue(nameof(OpenAIVectorStoreId), ref _openAIVectorStoreId, value);
+        }
+
+        /// <summary>Maximum number of hits to request from OpenAI vector store search.</summary>
+        [ModelDefault("DisplayFormat", "{0}")]
+        public int OpenAIVectorStoreMaxResults
+        {
+            get => _openAIVectorStoreMaxResults;
+            set => SetPropertyValue(nameof(OpenAIVectorStoreMaxResults), ref _openAIVectorStoreMaxResults, value);
         }
 
         // ── Non-persistent helper ──────────────────────────────────────────────

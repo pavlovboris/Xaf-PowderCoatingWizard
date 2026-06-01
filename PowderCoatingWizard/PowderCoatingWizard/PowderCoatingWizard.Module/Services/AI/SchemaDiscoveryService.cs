@@ -2,6 +2,8 @@ using DevExpress.ExpressApp.DC;
 using DevExpress.ExpressApp;
 using PowderCoatingWizard.Module.Attributes;
 using System.ComponentModel;
+using DevExpress.Xpo.Metadata;
+using DevExpress.Xpo;
 
 namespace PowderCoatingWizard.Module.Services.AI
 {
@@ -38,13 +40,42 @@ namespace PowderCoatingWizard.Module.Services.AI
 
             var sb = new System.Text.StringBuilder();
             sb.AppendLine("## Queryable Database Entities");
-            sb.AppendLine("You can use `list_entities`, `describe_entity`, and `query_entity` tools to fetch live data.");
+            sb.AppendLine("Use `get_database_insight` as the primary database evidence tool when live database facts may help answer the user's domain question.");
+            sb.AppendLine("The database insight tool may generate and execute safe read-only SELECT statements internally, but generated SQL and raw results must not be exposed unless explicitly requested.");
+            sb.AppendLine("Use `get_next_database_insight_page` only when the user explicitly asks for more rows/next page or confirms that additional pages are needed.");
+            sb.AppendLine("Do not expose raw records, SQL, or tabular analysis unless explicitly requested.");
             sb.AppendLine();
             foreach (var e in schema.Entities)
             {
                 var desc = string.IsNullOrWhiteSpace(e.Description) ? string.Empty : $" — {e.Description}";
                 sb.AppendLine($"- **{e.Name}**{desc}");
             }
+            return sb.ToString();
+        }
+
+        public string GenerateEnumPromptSection()
+        {
+            var schema = Schema;
+            var enumProperties = schema.Entities
+                .SelectMany(entity => entity.Properties
+                    .Where(property => property.EnumValues.Count > 0)
+                    .Select(property => new { Entity = entity, Property = property }))
+                .ToList();
+
+            if (enumProperties.Count == 0)
+                return string.Empty;
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("Enum value mappings for SQL result interpretation:");
+            sb.AppendLine("When a SQL column stores one of these enum integer values, use the mapped enum name in the evidence summary.");
+            sb.AppendLine();
+
+            foreach (var item in enumProperties)
+            {
+                var tableName = string.IsNullOrWhiteSpace(item.Entity.TableName) ? item.Entity.Name : item.Entity.TableName;
+                sb.AppendLine($"{tableName}.{item.Property.Name} ({item.Property.TypeName}): {string.Join(", ", item.Property.EnumValues)}");
+            }
+
             return sb.ToString();
         }
 
@@ -64,7 +95,8 @@ namespace PowderCoatingWizard.Module.Services.AI
                 {
                     Name = typeInfo.Type.Name,
                     ClrType = typeInfo.Type,
-                    Description = attr.Description
+                    Description = attr.Description,
+                    TableName = GetPersistentTableName(typeInfo.Type)
                 };
 
                 foreach (var member in typeInfo.Members)
@@ -121,7 +153,13 @@ namespace PowderCoatingWizard.Module.Services.AI
 
                     // Collect enum values
                     if (memberType.IsEnum)
-                        propInfo.EnumValues.AddRange(Enum.GetNames(memberType));
+                    {
+                        foreach (var value in Enum.GetValues(memberType))
+                        {
+                            var numericValue = Convert.ToInt64(value);
+                            propInfo.EnumValues.Add($"{numericValue}={value}");
+                        }
+                    }
 
                     // Description from ToolTip attribute (XAF) or standard DescriptionAttribute.
                     // ToolTipAttribute stores its text in the first constructor argument;
@@ -161,6 +199,18 @@ namespace PowderCoatingWizard.Module.Services.AI
             if (t.IsEnum) return $"enum({t.Name})";
             return t.Name;
         }
+
+        private static string GetPersistentTableName(Type type)
+        {
+            try
+            {
+                return XpoDefault.Session?.GetClassInfo(type)?.TableName ?? type.FullName ?? type.Name;
+            }
+            catch
+            {
+                return type.FullName ?? type.Name;
+            }
+        }
     }
 
     // ── Data transfer objects ────────────────────────────────────────────────
@@ -178,6 +228,7 @@ namespace PowderCoatingWizard.Module.Services.AI
         public string Name { get; set; } = string.Empty;
         public Type ClrType { get; set; } = typeof(object);
         public string Description { get; set; } = string.Empty;
+        public string TableName { get; set; } = string.Empty;
         public List<PropertyInfo> Properties { get; set; } = [];
         public List<RelationshipInfo> Relationships { get; set; } = [];
     }

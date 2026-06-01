@@ -14,8 +14,8 @@ namespace PowderCoatingWizard.Module.Services.AI
     /// </summary>
     public class DocumentIngestionService
     {
-        private const int ChunkSize = 800;    // characters per chunk
-        private const int ChunkOverlap = 100; // overlap between consecutive chunks
+        private const int ChunkSize = 1200;   // target characters per semantic chunk
+        private const int ChunkOverlap = 180; // overlap between consecutive chunks
 
         private readonly IObjectSpaceFactory _osFactory;
         private readonly EmbeddingService _embedding;
@@ -74,7 +74,8 @@ namespace PowderCoatingWizard.Module.Services.AI
             string text = ExtractText(doc);
             if (string.IsNullOrWhiteSpace(text)) return 0;
 
-            var chunks = SplitIntoChunks(text);
+            var sourceLabel = BuildSourceLabel(doc);
+            var chunks = SemanticChunkingService.CreateChunks(text, sourceLabel, ChunkSize, ChunkOverlap).ToList();
 
             // Generate all embeddings in one batch when possible
             float[][]? vectors = _embedding.IsAvailable
@@ -164,18 +165,15 @@ namespace PowderCoatingWizard.Module.Services.AI
             catch { return string.Empty; }
         }
 
-        private static List<string> SplitIntoChunks(string text)
+        private static string BuildSourceLabel(AIDocument doc)
         {
-            var chunks = new List<string>();
-            int pos = 0;
-            while (pos < text.Length)
-            {
-                int end = Math.Min(pos + ChunkSize, text.Length);
-                chunks.Add(text[pos..end]);
-                pos += ChunkSize - ChunkOverlap;
-                if (pos >= text.Length) break;
-            }
-            return chunks;
+            var title = !string.IsNullOrWhiteSpace(doc.Title)
+                ? doc.Title.Trim()
+                : doc.File?.FileName ?? "Document";
+
+            return !string.IsNullOrWhiteSpace(doc.Description)
+                ? $"Document: {title}. Description: {doc.Description.Trim()}"
+                : $"Document: {title}";
         }
     }
 }

@@ -35,7 +35,10 @@ namespace PowderCoatingWizard.Module.Services.AI
                 ApiKeyEncrypted = settings.ApiKeyEncrypted,
                 ModelId         = settings.ModelId,
                 EmbeddingModelId = settings.EmbeddingModelId,
-                IsEnabled       = settings.IsEnabled
+                IsEnabled       = settings.IsEnabled,
+                OpenAIVectorStoreEnabled = settings.OpenAIVectorStoreEnabled,
+                OpenAIVectorStoreId = settings.OpenAIVectorStoreId,
+                OpenAIVectorStoreMaxResults = settings.OpenAIVectorStoreMaxResults
             };
         }
 
@@ -133,5 +136,8 @@ namespace PowderCoatingWizard.Module.Services.AI
         /// <summary>Optional dedicated embedding model ID (e.g. "text-embedding-3-small").</summary>
         public string? EmbeddingModelId { get; init; }
         public bool    IsEnabled        { get; init; }
+        public bool OpenAIVectorStoreEnabled { get; init; }
+        public string? OpenAIVectorStoreId { get; init; }
+        public int OpenAIVectorStoreMaxResults { get; init; }
     }
 }

@@ -25,8 +25,10 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
         ApplicationUser _owner;
         AIAgent _agent;
         bool _isPublic;
+        bool _isArchived;
         DateTime _createdAt;
         DateTime _updatedAt;
+        DateTime? _archivedAt;
 
         /// <summary>Short descriptive title for the session (e.g. first user question or user-defined name).</summary>
         [Size(500)]
@@ -57,6 +59,13 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
             set => SetPropertyValue(nameof(IsPublic), ref _isPublic, value);
         }
 
+        /// <summary>Archived sessions are hidden from the assistant restore picker but remain available in the database.</summary>
+        public bool IsArchived
+        {
+            get => _isArchived;
+            set => SetPropertyValue(nameof(IsArchived), ref _isArchived, value);
+        }
+
         /// <summary>UTC timestamp when the session was first created.</summary>
         [ModelDefault("DisplayFormat", "{0:dd MMM yyyy  HH:mm}")]
         [ModelDefault("EditMask", "dd MMM yyyy  HH:mm")]
@@ -73,6 +82,15 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
         {
             get => _updatedAt;
             set => SetPropertyValue(nameof(UpdatedAt), ref _updatedAt, value);
+        }
+
+        /// <summary>UTC timestamp when the session was archived; null means the session is active.</summary>
+        [ModelDefault("DisplayFormat", "{0:dd MMM yyyy  HH:mm}")]
+        [ModelDefault("EditMask", "dd MMM yyyy  HH:mm")]
+        public DateTime? ArchivedAt
+        {
+            get => _archivedAt;
+            set => SetPropertyValue(nameof(ArchivedAt), ref _archivedAt, value);
         }
 
         /// <summary>Ordered list of messages that belong to this session.</summary>

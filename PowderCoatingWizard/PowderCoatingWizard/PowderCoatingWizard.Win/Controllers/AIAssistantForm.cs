@@ -29,6 +29,7 @@ namespace PowderCoatingWizard.Win.Controllers
         private readonly LineStage? _stage;
         private readonly AIAgent? _agent;
         private readonly Guid? _agentOid;
+        private readonly string? _connectionString;
 
         // RagChatClient wraps the real IChatClient and injects RAG context before every call.
         private readonly RagChatClient? _ragClient;
@@ -44,8 +45,13 @@ namespace PowderCoatingWizard.Win.Controllers
         private bool _clientRegistered;
 
 
-        // Status label shown at the bottom -- updated when tools are invoked.
+        // Status label shown in the toolbar -- updated when tools are invoked.
         private LabelControl _toolStatusLabel = null!;
+        // Persistent right-side history of tool calls.
+        private ListBoxControl _toolHistoryList = null!;
+        private System.Windows.Forms.SplitContainer _mainSplitContainer = null!;
+        private string? _activeToolName;
+        private AssistantWindowState? _windowState;
         // Persistent chat session â€” null means ephemeral (not saved).
         private AIChatSession? _session;
         // Separate ObjectSpace for session writes to avoid polluting the main _os.
@@ -58,12 +64,14 @@ namespace PowderCoatingWizard.Win.Controllers
             IObjectSpaceFactory? osFactory,
             LineStage? stage,
             AIAgent? agent = null,
-            AIChatSession? session = null)
+            AIChatSession? session = null,
+            string? connectionString = null)
         {
             _os = os;
             _osFactory = osFactory;
             _stage = stage;
             _chatClient = chatClient;
+            _connectionString = connectionString;
 
             // Store only the Oid
             // OnChatInitialized runs. We reload the agent from our own _os below.
@@ -112,16 +120,21 @@ namespace PowderCoatingWizard.Win.Controllers
                 if (dbQueryEnabled && IsTool(AgentTool.DbQuery))
                 {
                     var schema = new SchemaDiscoveryService();
-                    var dbQueryService = new DatabaseQueryToolService(_os, schema, dbMaxRecords);
-                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(dbQueryService.ListEntities, "list_entities"));
-                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(dbQueryService.DescribeEntity, "describe_entity"));
-                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(dbQueryService.QueryEntity, "query_entity"));
+                    var sqlSchema = new SqlServerSchemaProvider(_connectionString, schema.Schema.Entities.SelectMany(e => new[] { e.Name, e.ClrType.FullName ?? e.Name, e.TableName }));
+                    var sqlExecutor = new SafeSqlExecutor(_connectionString);
+                    var enumLookupService = new EnumLookupToolService(schema);
+                    var dbChatService = new DatabaseChatInsightService(chatClient, sqlSchema, sqlExecutor, dbMaxRecords);
+                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(dbChatService.GetDatabaseInsight, "get_database_insight"));
+                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(dbChatService.GetNextDatabaseInsightPage, "get_next_database_insight_page"));
+                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(enumLookupService.GetEnumMappings, "get_enum_mappings"));
+                    AILogger.LogEvent("DBTOOLS", "Legacy database query tools archived: list_entities, describe_entity, and query_entity are not registered.");
                 }
 
                 // Per-agent model parameters (temperature excluded — not injected to stay compatible with all models)
                 int maxTokens = _agent?.MaxTokens ?? 0;
                 int? tokens = maxTokens > 0 ? maxTokens : null;
                 var tools = toolList.AsReadOnly();
+                var allowedSkills = _agent?.EnabledSkills.Select(s => s.SkillName).ToList();
 
                 // Build pipeline so ConfigureOptions runs before FunctionInvokingChatClient.
                 // FunctionInvokingChatClient must see the injected tools; otherwise OpenAI returns
@@ -147,7 +160,9 @@ namespace PowderCoatingWizard.Win.Controllers
                 _ragClient = new RagChatClient(pipeline,
                     chatClient,   // raw provider client — for query planning only (no tools injected)
                     new RagSearchService(osFactory, new EmbeddingService(embeddingGenerator)),
-                    _agentOid);
+                    _agentOid,
+                    allowedSkills,
+                    AddRagHistoryEntry);
 
                 // Register the pipeline so AIChatControl picks it up with full streaming + thinking indicator.
                 try { AIExtensionsContainerDesktop.Default.UnregisterChatClient(); } catch { /* none registered */ }
@@ -166,10 +181,18 @@ namespace PowderCoatingWizard.Win.Controllers
             Text = _stage != null
                 ? $"AI Assistant{agentLabel} - {_stage.Name}"
                 : $"AI Assistant{agentLabel} - Powder Coating Wizard";
-            Size = new System.Drawing.Size(900, 700);
+            _windowState = AssistantWindowState.Load();
+            Size = _windowState.Size ?? new System.Drawing.Size(1100, 700);
             StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
             MinimizeBox = true;
             MaximizeBox = true;
+            MinimumSize = new System.Drawing.Size(850, 520);
+
+            if (_windowState.Location.HasValue)
+            {
+                StartPosition = System.Windows.Forms.FormStartPosition.Manual;
+                Location = _windowState.Location.Value;
+            }
 
             _chat = new AIChatControl
             {
@@ -202,6 +225,30 @@ namespace PowderCoatingWizard.Win.Controllers
             _chat.OptionsFileUpload.MaxFileCount = 5;
             _chat.OptionsFileUpload.MaxFileSize = 10 * 1024 * 1024;
             _chat.MarkdownConvert += OnMarkdownConvert;
+
+            _mainSplitContainer = new System.Windows.Forms.SplitContainer
+            {
+                Dock = System.Windows.Forms.DockStyle.Fill,
+                Orientation = System.Windows.Forms.Orientation.Vertical,
+                FixedPanel = System.Windows.Forms.FixedPanel.Panel2
+            };
+
+            var toolHistoryPanel = new DevExpress.XtraEditors.GroupControl
+            {
+                Text = "Tool History",
+                Dock = System.Windows.Forms.DockStyle.Fill
+            };
+
+            _toolHistoryList = new DevExpress.XtraEditors.ListBoxControl
+            {
+                Dock = System.Windows.Forms.DockStyle.Fill,
+                HorizontalScrollbar = true
+            };
+
+            toolHistoryPanel.Controls.Add(_toolHistoryList);
+            _mainSplitContainer.Panel1.Controls.Add(_chat);
+            _mainSplitContainer.Panel2.Controls.Add(toolHistoryPanel);
+            Shown += (_, _) => ConfigureMainSplitter();
 
             if (!_clientRegistered)
             {
@@ -244,16 +291,62 @@ namespace PowderCoatingWizard.Win.Controllers
             };
             createCaseStudyButton.Click += (_, _) => CreateCaseStudyFromConversation();
 
+            _toolStatusLabel = new DevExpress.XtraEditors.LabelControl
+            {
+                Dock = System.Windows.Forms.DockStyle.Right,
+                Text = "No tool running",
+                AutoSizeMode = DevExpress.XtraEditors.LabelAutoSizeMode.None,
+                Width = 260,
+                Appearance =
+                {
+                    TextOptions = { HAlignment = DevExpress.Utils.HorzAlignment.Center }
+                },
+                Padding = new System.Windows.Forms.Padding(8, 6, 8, 0),
+                BorderStyle = DevExpress.XtraEditors.Controls.BorderStyles.Simple
+            };
+
             toolbar.Controls.Add(createCaseStudyButton);
             toolbar.Controls.Add(shapeButton);
+            toolbar.Controls.Add(_toolStatusLabel);
 
             if (_sessionOs != null)
                 FormClosing += OnFormClosing;
-            _toolStatusLabel = new DevExpress.XtraEditors.LabelControl { Dock = System.Windows.Forms.DockStyle.Bottom, Text = string.Empty, AutoSizeMode = DevExpress.XtraEditors.LabelAutoSizeMode.None, Height = 22 };
+            FormClosing += (_, _) => SaveAssistantWindowState();
 
-            Controls.Add(_chat);
-            Controls.Add(_toolStatusLabel);
+            Controls.Add(_mainSplitContainer);
             Controls.Add(toolbar);
+        }
+
+        private void ConfigureMainSplitter()
+        {
+            const int chatMinWidth = 520;
+            const int historyMinWidth = 220;
+            const int defaultHistoryWidth = 300;
+
+            if (!_mainSplitContainer.IsHandleCreated)
+                return;
+
+            _mainSplitContainer.Panel1MinSize = chatMinWidth;
+            _mainSplitContainer.Panel2MinSize = historyMinWidth;
+
+            var historyWidth = _windowState?.ToolHistoryWidth ?? defaultHistoryWidth;
+            historyWidth = Math.Max(historyMinWidth, Math.Min(historyWidth, Math.Max(historyMinWidth, _mainSplitContainer.Width - chatMinWidth)));
+            _mainSplitContainer.SplitterDistance = Math.Max(chatMinWidth, _mainSplitContainer.Width - historyWidth);
+        }
+
+        private void SaveAssistantWindowState()
+        {
+            var state = _windowState ?? new AssistantWindowState();
+            if (WindowState == System.Windows.Forms.FormWindowState.Normal)
+            {
+                state.Size = Size;
+                state.Location = Location;
+            }
+
+            if (_mainSplitContainer?.IsHandleCreated == true)
+                state.ToolHistoryWidth = _mainSplitContainer.Panel2.Width;
+
+            state.Save();
         }
 
         // Prompt Shaper
@@ -515,7 +608,50 @@ namespace PowderCoatingWizard.Win.Controllers
         }
 
 
-        private void SetToolStatus(string? toolName) { if (_toolStatusLabel == null) return; if (InvokeRequired) { Invoke(() => SetToolStatus(toolName)); return; } _toolStatusLabel.Text = toolName != null ? $"Working: {toolName}..." : string.Empty; }
+        private void SetToolStatus(string? toolName)
+        {
+            if (_toolStatusLabel == null) return;
+            if (InvokeRequired) { Invoke(() => SetToolStatus(toolName)); return; }
+
+            bool running = !string.IsNullOrWhiteSpace(toolName);
+            _toolStatusLabel.Text = running ? $"Tool running: {toolName}" : "No tool running";
+            _toolStatusLabel.Appearance.BackColor = running
+                ? System.Drawing.Color.FromArgb(255, 244, 204)
+                : System.Drawing.Color.FromArgb(235, 245, 235);
+            _toolStatusLabel.Appearance.ForeColor = running
+                ? System.Drawing.Color.FromArgb(120, 80, 0)
+                : System.Drawing.Color.FromArgb(30, 100, 30);
+
+            AddToolHistoryEntry(toolName);
+        }
+
+        private void AddToolHistoryEntry(string? toolName)
+        {
+            if (_toolHistoryList == null) return;
+
+            var now = DateTime.Now.ToString("HH:mm:ss");
+            if (!string.IsNullOrWhiteSpace(toolName))
+            {
+                _activeToolName = toolName;
+                _toolHistoryList.Items.Insert(0, $"{now}  START  {toolName}");
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(_activeToolName))
+            {
+                _toolHistoryList.Items.Insert(0, $"{now}  END    {_activeToolName}");
+                _activeToolName = null;
+            }
+        }
+
+        private void AddRagHistoryEntry(string message)
+        {
+            if (_toolHistoryList == null) return;
+            if (InvokeRequired) { Invoke(() => AddRagHistoryEntry(message)); return; }
+
+            var now = DateTime.Now.ToString("HH:mm:ss");
+            _toolHistoryList.Items.Insert(0, $"{now}  RAG    {message}");
+        }
 
         protected override void Dispose(bool disposing)
         {
@@ -533,6 +669,77 @@ namespace PowderCoatingWizard.Win.Controllers
                 _chat?.Dispose();
             }
             base.Dispose(disposing);
+        }
+
+        private sealed class AssistantWindowState
+        {
+            private static readonly string FilePath = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "PowderCoatingWizard",
+                "AIAssistantWindowState.txt");
+
+            public System.Drawing.Size? Size { get; set; }
+            public System.Drawing.Point? Location { get; set; }
+            public int? ToolHistoryWidth { get; set; }
+
+            public static AssistantWindowState Load()
+            {
+                var state = new AssistantWindowState();
+                try
+                {
+                    if (!System.IO.File.Exists(FilePath))
+                        return state;
+
+                    foreach (var line in System.IO.File.ReadAllLines(FilePath))
+                    {
+                        var parts = line.Split('=', 2);
+                        if (parts.Length != 2) continue;
+
+                        if (parts[0] == "Size" && TryReadPair(parts[1], out var width, out var height))
+                            state.Size = new System.Drawing.Size(width, height);
+                        else if (parts[0] == "Location" && TryReadPair(parts[1], out var x, out var y))
+                            state.Location = new System.Drawing.Point(x, y);
+                        else if (parts[0] == "ToolHistoryWidth" && int.TryParse(parts[1], out var toolHistoryWidth))
+                            state.ToolHistoryWidth = toolHistoryWidth;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DevExpress.Persistent.Base.Tracing.Tracer.LogError(ex);
+                }
+
+                return state;
+            }
+
+            public void Save()
+            {
+                try
+                {
+                    var directory = System.IO.Path.GetDirectoryName(FilePath);
+                    if (!string.IsNullOrWhiteSpace(directory))
+                        System.IO.Directory.CreateDirectory(directory);
+
+                    var lines = new List<string>();
+                    if (Size.HasValue) lines.Add($"Size={Size.Value.Width},{Size.Value.Height}");
+                    if (Location.HasValue) lines.Add($"Location={Location.Value.X},{Location.Value.Y}");
+                    if (ToolHistoryWidth.HasValue) lines.Add($"ToolHistoryWidth={ToolHistoryWidth.Value}");
+                    System.IO.File.WriteAllLines(FilePath, lines);
+                }
+                catch (Exception ex)
+                {
+                    DevExpress.Persistent.Base.Tracing.Tracer.LogError(ex);
+                }
+            }
+
+            private static bool TryReadPair(string value, out int first, out int second)
+            {
+                first = 0;
+                second = 0;
+                var parts = value.Split(',', 2);
+                return parts.Length == 2
+                    && int.TryParse(parts[0], out first)
+                    && int.TryParse(parts[1], out second);
+            }
         }
     }
 }

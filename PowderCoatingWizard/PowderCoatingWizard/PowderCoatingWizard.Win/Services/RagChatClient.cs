@@ -1,5 +1,6 @@
 ﻿using DevExpress.Persistent.Base;
 using Microsoft.Extensions.AI;
+using PowderCoatingWizard.Module.BusinessObjects.AI;
 using PowderCoatingWizard.Module.Services.AI;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
@@ -29,14 +30,26 @@ namespace PowderCoatingWizard.Win.Services
         // to attempt tool calls during RAG preprocessing and blocks / corrupts the pipeline.
         private readonly IChatClient _plannerClient;
         private readonly RagSearchService _ragSearch;
+        private readonly AIIntentRouterService _intentRouter;
+        private readonly AISkillRouterService _skillRouter;
         private readonly Guid? _agentOid;
+        private readonly Action<string>? _onRagStatus;
 
-        public RagChatClient(IChatClient inner, IChatClient plannerClient, RagSearchService ragSearch, Guid? agentOid)
+        public RagChatClient(
+            IChatClient inner,
+            IChatClient plannerClient,
+            RagSearchService ragSearch,
+            Guid? agentOid,
+            IEnumerable<AgentSkill>? allowedSkills = null,
+            Action<string>? onRagStatus = null)
             : base(inner)
         {
             _plannerClient = plannerClient;
             _ragSearch = ragSearch;
+            _intentRouter = new AIIntentRouterService(plannerClient);
+            _skillRouter = new AISkillRouterService(allowedSkills);
             _agentOid = agentOid;
+            _onRagStatus = onRagStatus;
         }
 
         public override async Task<ChatResponse> GetResponseAsync(
@@ -137,37 +150,141 @@ namespace PowderCoatingWizard.Win.Services
             var userText = string.Concat(lastUser.Contents.OfType<TextContent>().Select(t => t.Text));
             if (string.IsNullOrWhiteSpace(userText)) { AILogger.LogEvent("RAG", "User message is empty — skipping RAG"); return list; }
 
-            AILogger.LogEvent("RAG", $"Searching RAG for: {userText[..Math.Min(120, userText.Length)]}");
+            NotifyRagStatus("START  Classify intent");
+            var intent = await _intentRouter.ClassifyAsync(userText, ct);
+            AILogger.LogEvent("INTENT", $"Classified as {intent}: {userText[..Math.Min(120, userText.Length)]}");
+            NotifyRagStatus($"INTENT {intent}");
 
-            IReadOnlyList<string> chunks;
+            var skill = _skillRouter.Route(userText, intent);
+            AILogger.LogEvent("SKILL", $"Selected {skill} for intent {intent}");
+            NotifyRagStatus($"SKILL  {skill}");
+
+            AddIntentInstruction(list, lastUser, intent);
+            AddSkillInstruction(list, lastUser, skill);
+
+            if (intent == AIQueryIntent.GeneralChat || intent == AIQueryIntent.DatabaseQuestion)
+            {
+                AILogger.LogEvent("RAG", $"Skipping RAG for intent {intent}");
+                NotifyRagStatus($"SKIP   {intent}");
+                return list;
+            }
+
+            AILogger.LogEvent("RAG", $"Searching RAG for: {userText[..Math.Min(120, userText.Length)]}");
+            NotifyRagStatus("START  Search knowledge base");
+
+            IReadOnlyList<RagSearchResult> results;
             try
             {
                 // Use the raw provider client (no tools, no function-invoking middleware) for
                 // query planning so that classify / HyDE / decompose calls are plain LLM calls.
-                chunks = await _ragSearch.SearchAsync(userText, agentOid: _agentOid, chatClient: _plannerClient, ct: ct);
+                results = await _ragSearch.SearchDetailedAsync(userText, agentOid: _agentOid, chatClient: _plannerClient, ct: ct);
             }
             catch (Exception ex)
             {
                 AILogger.LogError("RAG:SEARCH", ex);
+                NotifyRagStatus("ERROR  Search failed");
                 return list; // RAG failure is non-fatal
             }
 
-            AILogger.LogEvent("RAG", $"RAG returned {chunks.Count} chunk(s)");
-            if (chunks.Count == 0) return list;
+            AILogger.LogEvent("RAG", $"RAG returned {results.Count} chunk(s)");
+            NotifyRagSourceSummary(results);
+            NotifyRagStatus($"END    {results.Count} chunk(s)");
+            if (results.Count == 0) return list;
 
             var sb = new System.Text.StringBuilder();
-            sb.AppendLine("## Relevant Knowledge Base Excerpts");
-            sb.AppendLine("The following excerpts from uploaded documents are relevant to the current question.");
-            sb.AppendLine("Prioritise this information when formulating your answer.");
-            foreach (var chunk in chunks)
+            sb.AppendLine("## Retrieved Evidence");
+            sb.AppendLine("Use the following retrieved evidence only when relevant. Cite sources using the provided citation label.");
+            sb.AppendLine("If evidence is insufficient, explicitly say what is missing instead of inventing facts.");
+            foreach (var result in results)
             {
                 sb.AppendLine();
-                sb.AppendLine(chunk);
+                sb.AppendLine($"### {result.Citation} (score: {result.Score:F3})");
+                sb.AppendLine(result.Text);
             }
 
             int insertAt = list.LastIndexOf(lastUser);
             list.Insert(insertAt, new ChatMessage(ChatRole.System, sb.ToString()));
             return list;
+        }
+
+        private void NotifyRagStatus(string message)
+        {
+            try { _onRagStatus?.Invoke(message); }
+            catch { /* UI status is non-critical */ }
+        }
+
+        private void NotifyRagSourceSummary(IReadOnlyList<RagSearchResult> results)
+        {
+            int localDocumentCount = results.Count(r => r.SourceType == "Document");
+            int localCaseStudyCount = results.Count(r => r.SourceType == "Case Study");
+            int openAiCount = results.Count(r => r.SourceType == "OpenAI Vector Store");
+
+            if (localDocumentCount + localCaseStudyCount > 0)
+                NotifyRagStatus($"LOCAL  {localDocumentCount} doc, {localCaseStudyCount} case");
+
+            if (openAiCount > 0)
+                NotifyRagStatus($"OPENAI {openAiCount} vector hit(s)");
+
+            if (results.Count > 0)
+            {
+                var sources = results
+                    .GroupBy(r => r.SourceType)
+                    .Select(g => $"{g.Key}: {g.Count()}");
+                NotifyRagStatus($"MIX    {string.Join(", ", sources)}");
+            }
+        }
+
+        private static void AddIntentInstruction(List<ChatMessage> messages, ChatMessage lastUser, AIQueryIntent intent)
+        {
+            var intentInstruction = intent switch
+            {
+                AIQueryIntent.DatabaseQuestion =>
+                    "Intent: DatabaseQuestion. Prefer database/tool evidence over general knowledge, but keep the assistant domain-focused rather than query-focused. Use get_database_insight as the primary database evidence tool to gather facts for summaries, comparisons, counts, aggregates, trends, and analysis. If database evidence contains enum integer values that need decoding, call get_enum_mappings for the relevant entity/property. Do not expose generated SQL, raw records, or tabular output unless the user explicitly asks for a table, list, report, or record-level output. Use get_next_database_insight_page only when the user explicitly asks for more rows/next page or confirms that additional pages are needed. If required data is missing, say exactly what is missing. Do not invent measurements or limits.",
+                AIQueryIntent.DocumentQuestion =>
+                    "Intent: DocumentQuestion. Prefer uploaded documents, standards, certificates, SOPs, and retrieved knowledge-base excerpts. If document evidence is insufficient, say so. Do not invent certificate dates, limits, or compliance status.",
+                AIQueryIntent.CaseStudyQuestion =>
+                    "Intent: CaseStudyQuestion. Prefer approved case studies and lessons learned. Distinguish prior examples from current measured facts. If no similar case is found, say so.",
+                AIQueryIntent.HybridInvestigation =>
+                    "Intent: HybridInvestigation. Combine database/tool evidence with documents and approved case studies. Clearly separate observed data, document/case-study evidence, inferred cause, uncertainty, and recommended next actions. Do not invent measurements or causes.",
+                _ =>
+                    "Intent: GeneralChat. Answer conversationally and do not perform document/database analysis unless the user asks for it."
+            };
+
+            var instruction = intentInstruction + Environment.NewLine + Environment.NewLine +
+                "Professional answer contract: " +
+                "Base the answer on explicit evidence from database tools, retrieved documents, or approved case studies. " +
+                "Clearly distinguish observed data, retrieved evidence, inference, uncertainty, and recommended next actions. " +
+                "When using retrieved evidence, include its citation label. " +
+                "Use database evidence internally to complete the user's task; do not expose generated SQL, raw records, or tabular analysis unless the user explicitly asks for a table, list, report, export, or record-level output. " +
+                "Use get_enum_mappings only on demand when integer enum values from database evidence need human-readable names. " +
+                "Call additional database pages only in exceptional cases when the user explicitly asks for more rows or confirms that more pages are needed. " +
+                "If the evidence is missing or insufficient, state what data is needed. " +
+                "Do not invent measurements, dates, thresholds, certificate validity, causes, or compliance conclusions.";
+
+            int insertAt = messages.LastIndexOf(lastUser);
+            messages.Insert(insertAt, new ChatMessage(ChatRole.System, instruction));
+        }
+
+        private static void AddSkillInstruction(List<ChatMessage> messages, ChatMessage lastUser, AgentSkill skill)
+        {
+            var instruction = skill switch
+            {
+                AgentSkill.CoatingDefectInvestigation =>
+                    "Skill: CoatingDefectInvestigation. Use document and case-study evidence first for coating defects, surface appearance, adhesion, gloss, contamination, stains, corrosion, orange peel, pinholes, craters, and similar quality issues. Use get_database_insight when the user asks about a specific stage, bath, measurement, threshold, trend, time period, or current production data. Keep database output internal unless table/list output is explicitly requested. Structure the answer as: Observed facts, Evidence, Likely causes, Missing data, Next checks, Recommended actions.",
+                AgentSkill.ChemicalBathAnalysis =>
+                    "Skill: ChemicalBathAnalysis. Focus on bath chemistry, concentration, pH, temperature, dosing, limits, active chemicals, and quality risk. Prefer get_database_insight and domain tools for current or historical bath data, including summaries and aggregate reasoning. Clearly state in-range/out-of-range status, missing measurements, likely process impact, and corrective checks. Do not output tables unless explicitly requested.",
+                AgentSkill.ProcessTrendAnalysis =>
+                    "Skill: ProcessTrendAnalysis. Prefer trend, measurement, and get_database_insight tools. Use database evidence for summaries, comparisons, aggregate reasoning, direction, drift, abnormal periods, correlations, and uncertainty. Do not infer root cause without supporting evidence. Include time window, parameter names, observed values, and recommended follow-up checks. Return tabular analysis only when the user explicitly asks for a table, list, report, or record-level output.",
+                AgentSkill.DocumentCompliance =>
+                    "Skill: DocumentCompliance. Prefer retrieved document evidence from local documents and OpenAI Vector Store. Cite sources. Explain what the document says and what it does not prove. Do not invent certificate validity, standard limits, compliance status, dates, or supplier claims.",
+                AgentSkill.CaseStudyMatching =>
+                    "Skill: CaseStudyMatching. Prefer approved case studies and lessons learned. Compare similarities and differences between prior cases and the user's situation. Distinguish previous examples from current measured facts. If no similar case is found, say so and list what data would help matching.",
+                _ =>
+                    "Skill: GeneralAnswer. Answer directly and avoid unnecessary database tools or document searches unless the user asks for data, documents, standards, case studies, measurements, or investigation."
+            };
+
+            int insertAt = messages.LastIndexOf(lastUser);
+            messages.Insert(insertAt, new ChatMessage(ChatRole.System, instruction));
         }
 
         /// <summary>

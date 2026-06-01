@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using DevExpress.Persistent.Base;
 using System.Text.Json;
 
 namespace PowderCoatingWizard.Module.Services.AI
@@ -19,10 +20,10 @@ namespace PowderCoatingWizard.Module.Services.AI
         public int MaxSubqueries { get; set; }
 
         /// <summary>ChatOptions used for the Decompose LLM call.</summary>
-        public ChatOptions DecomposeOptions { get; set; } = new ChatOptions { MaxOutputTokens = 300, Temperature = 0.2f };
+        public ChatOptions DecomposeOptions { get; set; } = new ChatOptions { MaxOutputTokens = 300 };
 
         /// <summary>ChatOptions used for the HyDE LLM call.</summary>
-        public ChatOptions HyDEOptions { get; set; } = new ChatOptions { MaxOutputTokens = 200, Temperature = 0.3f };
+        public ChatOptions HyDEOptions { get; set; } = new ChatOptions { MaxOutputTokens = 200 };
 
         public QueryPlannerService(IChatClient llm, int maxSubqueries = 4)
         {
@@ -32,8 +33,8 @@ namespace PowderCoatingWizard.Module.Services.AI
 
         /// <summary>
         /// Returns one or more search strings to use for embedding retrieval.
-        /// For a simple query returns a single HyDE expansion.
-        /// For a complex query returns multiple focused decompositions.
+        /// For a simple query returns the original query plus a HyDE expansion.
+        /// For a complex query returns the original query plus multiple focused decompositions.
         /// </summary>
         public async Task<IReadOnlyList<string>> PlanAsync(string userQuery, CancellationToken ct = default)
         {
@@ -43,12 +44,34 @@ namespace PowderCoatingWizard.Module.Services.AI
             bool isComplex = await ClassifyAsync(userQuery, ct);
 
             if (isComplex)
-                return await DecomposeAsync(userQuery, ct);
-            else
-                return [await HyDEAsync(userQuery, ct)];
+            {
+                var decomposed = await DecomposeAsync(userQuery, ct);
+                return AddOriginalQuery(userQuery, decomposed);
+            }
+
+            var hyde = await HyDEAsync(userQuery, ct);
+            return AddOriginalQuery(userQuery, [hyde]);
         }
 
         // ── Private helpers ─────────────────────────────────────────────────
+
+        private static IReadOnlyList<string> AddOriginalQuery(string originalQuery, IEnumerable<string> plannedQueries)
+        {
+            var result = new List<string>();
+            if (!string.IsNullOrWhiteSpace(originalQuery))
+                result.Add(originalQuery.Trim());
+
+            foreach (var query in plannedQueries)
+            {
+                if (string.IsNullOrWhiteSpace(query)) continue;
+
+                var trimmed = query.Trim();
+                if (!result.Any(existing => string.Equals(existing, trimmed, StringComparison.OrdinalIgnoreCase)))
+                    result.Add(trimmed);
+            }
+
+            return result;
+        }
 
         private async Task<bool> ClassifyAsync(string query, CancellationToken ct)
         {
@@ -67,12 +90,13 @@ namespace PowderCoatingWizard.Module.Services.AI
             try
             {
                 var response = await _llm.GetResponseAsync(messages,
-                    new ChatOptions { MaxOutputTokens = 5, Temperature = 0f }, ct);
+                    new ChatOptions { MaxOutputTokens = 5 }, ct);
                 var text = response.Text?.Trim().ToUpperInvariant() ?? string.Empty;
                 return text.StartsWith("COMPLEX");
             }
-            catch
+            catch (Exception ex)
             {
+                Tracing.Tracer.LogError(ex);
                 return false; // Default to simple on failure — HyDE is safe
             }
         }
@@ -101,7 +125,10 @@ namespace PowderCoatingWizard.Module.Services.AI
                 if (subqueries is { Count: > 0 })
                     return subqueries.Take(MaxSubqueries).ToList();
             }
-            catch { /* fall through */ }
+            catch (Exception ex)
+            {
+                Tracing.Tracer.LogError(ex);
+            }
 
             // Fallback: return original query as-is
             return [query];
@@ -128,7 +155,10 @@ namespace PowderCoatingWizard.Module.Services.AI
                 if (!string.IsNullOrEmpty(hydeText))
                     return hydeText;
             }
-            catch { /* fall through */ }
+            catch (Exception ex)
+            {
+                Tracing.Tracer.LogError(ex);
+            }
 
             return query; // Fallback to original
         }

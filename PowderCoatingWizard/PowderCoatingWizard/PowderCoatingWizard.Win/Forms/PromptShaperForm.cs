@@ -174,8 +174,10 @@ namespace PowderCoatingWizard.Win.Forms
             _okButton = new SimpleButton { Text = "Send", Width = 90, Height = 30, DialogResult = System.Windows.Forms.DialogResult.None };
             _okButton.Click += (_, _) =>
             {
-                FinalPrompt = _previewEdit.Text.Trim();
+                _previewEdit.DoValidate();
+                FinalPrompt = (_previewEdit.EditValue?.ToString() ?? _previewEdit.Text).Trim();
                 if (string.IsNullOrWhiteSpace(FinalPrompt)) return;
+                PowderCoatingWizard.Win.Services.AILogger.LogEvent("PROMPT_SHAPER", $"Sending shaped prompt: {FinalPrompt[..Math.Min(200, FinalPrompt.Length)]}");
                 DialogResult = System.Windows.Forms.DialogResult.OK;
                 Close();
             };

@@ -18,6 +18,7 @@ namespace PowderCoatingWizard.Win.Forms
         private GridView _view = null!;
         private SimpleButton _newButton = null!;
         private SimpleButton _restoreButton = null!;
+        private SimpleButton _archiveButton = null!;
         private SimpleButton _cancelButton = null!;
 
         private readonly IObjectSpace _os;
@@ -36,7 +37,7 @@ namespace PowderCoatingWizard.Win.Forms
             // Load sessions: owned by current user OR public
             var currentUserName = SecuritySystem.CurrentUserName;
             _sessions = _os.GetObjects<AIChatSession>()
-                .Where(s => s.IsPublic || (s.Owner != null && s.Owner.UserName == currentUserName))
+                .Where(s => !s.IsArchived && (s.IsPublic || (s.Owner != null && s.Owner.UserName == currentUserName)))
                 .OrderByDescending(s => s.UpdatedAt)
                 .ToList();
 
@@ -145,11 +146,21 @@ namespace PowderCoatingWizard.Win.Forms
             };
             _restoreButton.Click += (_, _) => RestoreSelected();
 
+            _archiveButton = new SimpleButton
+            {
+                Text = "Archive",
+                Width = 90,
+                Left = 224,
+                Top = 6,
+                Anchor = System.Windows.Forms.AnchorStyles.Left
+            };
+            _archiveButton.Click += (_, _) => ArchiveSelected();
+
             _cancelButton = new SimpleButton
             {
                 Text = "Cancel",
                 Width = 80,
-                Left = 224,
+                Left = 322,
                 Top = 6,
                 Anchor = System.Windows.Forms.AnchorStyles.Left
             };
@@ -159,7 +170,7 @@ namespace PowderCoatingWizard.Win.Forms
                 Close();
             };
 
-            buttonPanel.Controls.AddRange(new System.Windows.Forms.Control[] { _newButton, _restoreButton, _cancelButton });
+            buttonPanel.Controls.AddRange(new System.Windows.Forms.Control[] { _newButton, _restoreButton, _archiveButton, _cancelButton });
 
             // Docking order matters: Bottom and Top anchors must be added before Fill.
             Controls.Add(buttonPanel);
@@ -177,6 +188,41 @@ namespace PowderCoatingWizard.Win.Forms
                 DialogResult = System.Windows.Forms.DialogResult.OK;
                 Close();
             }
+        }
+
+        private void ArchiveSelected()
+        {
+            var idx = _view.GetFocusedDataSourceRowIndex();
+            if (idx < 0 || idx >= _sessions.Count)
+            {
+                XtraMessageBox.Show(
+                    "Select a session to archive.",
+                    "Chat Sessions",
+                    System.Windows.Forms.MessageBoxButtons.OK,
+                    System.Windows.Forms.MessageBoxIcon.Information);
+                return;
+            }
+
+            var session = _sessions[idx];
+            var result = XtraMessageBox.Show(
+                $"Archive chat session '{session.Title}'?\n\nIt will be hidden from this restore list but kept in the database.",
+                "Archive Chat Session",
+                System.Windows.Forms.MessageBoxButtons.YesNo,
+                System.Windows.Forms.MessageBoxIcon.Question);
+
+            if (result != System.Windows.Forms.DialogResult.Yes)
+                return;
+
+            session.IsArchived = true;
+            session.ArchivedAt = DateTime.UtcNow;
+            _os.CommitChanges();
+
+            _sessions.RemoveAt(idx);
+            _grid.DataSource = null;
+            _grid.DataSource = _sessions;
+
+            if (_sessions.Count > 0)
+                _view.FocusedRowHandle = Math.Min(idx, _sessions.Count - 1);
         }
     }
 }

@@ -21,6 +21,26 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
         [Description("General database query tools (list / describe / query entities)")]
         DbQuery        = 8,
     }
+
+    /// <summary>
+    /// Runtime-configurable agent skills. Skills guide the workflow and answer structure;
+    /// they are stored as <see cref="AIAgentSkill"/> rows associated with an agent.
+    /// </summary>
+    public enum AgentSkill
+    {
+        [Description("General assistant answers without specialized workflow")]
+        GeneralAnswer = 0,
+        [Description("Investigate coating defects using evidence, causes, missing data, and actions")]
+        CoatingDefectInvestigation = 1,
+        [Description("Analyze chemical bath parameters, limits, dosing, and quality risk")]
+        ChemicalBathAnalysis = 2,
+        [Description("Analyze measurement trends, drift, abnormal periods, and correlations")]
+        ProcessTrendAnalysis = 3,
+        [Description("Answer from standards, certificates, SOPs, TDS/SDS, and document evidence")]
+        DocumentCompliance = 4,
+        [Description("Find similar approved case studies and reusable lessons")]
+        CaseStudyMatching = 5
+    }
     /// <summary>
     /// A named AI agent profile that groups a specific set of instructions
     /// and optionally restricts which documents are visible in RAG search.
@@ -121,6 +141,25 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
             if (col.Count == 0) return true;
             foreach (var t in col)
                 if (t.ToolName == tool) return true;
+            return false;
+        }
+
+        // ── Skill enablement ──────────────────────────────────────────────────
+
+        /// <summary>
+        /// Skills enabled for this agent. Add or remove <see cref="AIAgentSkill"/> rows to control
+        /// which workflows the agent may use. An empty collection means ALL skills are enabled.
+        /// </summary>
+        [Association("AIAgent-EnabledSkills")]
+        [Aggregated]
+        public XPCollection<AIAgentSkill> EnabledSkills => GetCollection<AIAgentSkill>(nameof(EnabledSkills));
+
+        public bool HasSkill(AgentSkill skill)
+        {
+            var col = EnabledSkills;
+            if (col.Count == 0) return true;
+            foreach (var s in col)
+                if (s.SkillName == skill) return true;
             return false;
         }
 
