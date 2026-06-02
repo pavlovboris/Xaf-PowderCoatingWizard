@@ -60,6 +60,7 @@ namespace PowderCoatingWizard.Module.Services.AI
                         : response.Answer;
 
                 var safeSql = SafeSqlExecutor.NormalizeAndValidate(response.Sql);
+                ValidateSoftDeleteFilters(safeSql, schemaSummary);
                 LogGeneratedSql("generated", safeSql, question);
                 var table = await _sqlExecutor.ExecuteSafeSelectAsync(safeSql, _maxRows, ct);
                 _lastSql = safeSql;
@@ -110,6 +111,7 @@ namespace PowderCoatingWizard.Module.Services.AI
                 "Generate only read-only SQL Server SELECT statements. Never generate INSERT, UPDATE, DELETE, MERGE, DROP, ALTER, TRUNCATE, CREATE, EXEC, DBCC, or multiple statements. " +
                 "Use only the allowed schema. " +
                 "Use LIKE '%value%' for text search unless exact matching is clearly required. " +
+                "For every table that has GCRecord, exclude XPO soft-deleted rows with GCRecord IS NULL. " +
                 "Do not add markdown or code fences. If the schema is insufficient, set sql to an empty string and explain the missing data in answer. " +
                 "The final assistant may use your result internally; do not optimize for table display.\n\n" +
                 schemaSummary;
@@ -233,12 +235,62 @@ namespace PowderCoatingWizard.Module.Services.AI
             var selects = requestedTables.Select(tableName =>
             {
                 var safeLabel = tableName.Replace("'", "''");
-                return $"SELECT '{safeLabel}' AS EntityName, COUNT_BIG(*) AS RecordCount FROM {tableName}";
+                var filter = TableHasGcRecord(schemaSummary, tableName) ? " WHERE GCRecord IS NULL" : string.Empty;
+                return $"SELECT '{safeLabel}' AS EntityName, COUNT_BIG(*) AS RecordCount FROM {tableName}{filter}";
             });
 
             sql = string.Join(" UNION ALL ", selects);
             return true;
         }
+
+        private static void ValidateSoftDeleteFilters(string sql, string schemaSummary)
+        {
+            foreach (var tableName in GetSoftDeleteTableNames(schemaSummary))
+            {
+                if (!SqlReferencesTable(sql, tableName))
+                    continue;
+
+                if (!Regex.IsMatch(sql, @"\bGCRecord\s+IS\s+NULL\b", RegexOptions.IgnoreCase))
+                    throw new InvalidOperationException($"The SQL statement must exclude XPO soft-deleted rows from {tableName} with GCRecord IS NULL.");
+            }
+        }
+
+        private static bool TableHasGcRecord(string schemaSummary, string tableName) =>
+            GetSoftDeleteTableNames(schemaSummary).Any(t => TableNamesEqual(t, tableName));
+
+        private static IEnumerable<string> GetSoftDeleteTableNames(string schemaSummary)
+        {
+            var currentTable = string.Empty;
+            foreach (var line in schemaSummary.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+            {
+                var tableMatch = Regex.Match(line, @"^Table:\s+(?<table>[\w\[\]\.]+)\s*$", RegexOptions.IgnoreCase);
+                if (tableMatch.Success)
+                {
+                    currentTable = tableMatch.Groups["table"].Value;
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(currentTable) &&
+                    line.Contains("GCRecord", StringComparison.OrdinalIgnoreCase) &&
+                    line.Contains("XPO soft delete", StringComparison.OrdinalIgnoreCase))
+                {
+                    yield return currentTable;
+                }
+            }
+        }
+
+        private static bool SqlReferencesTable(string sql, string tableName)
+        {
+            var simpleName = tableName.Split('.').Last().Trim('[', ']');
+            return Regex.IsMatch(sql, $@"\b(from|join)\s+(?:\[[^\]]+\]\.)?\[?{Regex.Escape(simpleName)}\]?\b", RegexOptions.IgnoreCase) ||
+                Regex.IsMatch(sql, $@"\b(from|join)\s+{Regex.Escape(tableName)}\b", RegexOptions.IgnoreCase);
+        }
+
+        private static bool TableNamesEqual(string left, string right) =>
+            NormalizeTableName(left).Equals(NormalizeTableName(right), StringComparison.OrdinalIgnoreCase);
+
+        private static string NormalizeTableName(string tableName) =>
+            new(tableName.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
         private static bool IsCountLikeQuestion(string question)
         {
@@ -269,6 +321,7 @@ namespace PowderCoatingWizard.Module.Services.AI
                 sb.AppendLine($"Planner note: {answer.Trim()}");
             sb.AppendLine($"Rows returned: {table.Rows.Count} (limited to {_maxRows})");
             sb.AppendLine($"Columns returned: {table.Columns.Count} (display limited to {_maxColumns})");
+            AppendQualityHints(sb, table, explicitTabularOutput);
             sb.AppendLine();
 
             if (table.Rows.Count == 0 || table.Columns.Count == 0)
@@ -289,6 +342,49 @@ namespace PowderCoatingWizard.Module.Services.AI
             }
 
             return sb.ToString();
+        }
+
+        private void AppendQualityHints(StringBuilder sb, DataTable table, bool explicitTabularOutput)
+        {
+            var hints = new List<string>();
+            if (table.Rows.Count >= _maxRows)
+                hints.Add("Result reached the row cap; answer only from the returned evidence or ask for a narrower filter/next page when appropriate.");
+
+            if (table.Columns.Count > _maxColumns)
+                hints.Add("Result has more columns than the display limit; use only visible evidence unless additional detail is explicitly needed.");
+
+            var enumLikeColumns = table.Columns.Cast<DataColumn>()
+                .Where(c => IsEnumLikeColumn(c.ColumnName, table))
+                .Select(c => c.ColumnName)
+                .Take(6)
+                .ToList();
+            if (enumLikeColumns.Count > 0)
+                hints.Add($"Potential enum/status integer columns detected ({string.Join(", ", enumLikeColumns)}); call get_enum_mappings when human-readable names are needed.");
+
+            if (!explicitTabularOutput)
+                hints.Add("Keep this evidence internal; do not present raw rows or a table unless the user explicitly requested that output.");
+
+            if (hints.Count == 0)
+                return;
+
+            sb.AppendLine("Quality hints:");
+            foreach (var hint in hints)
+                sb.AppendLine("- " + hint);
+        }
+
+        private static bool IsEnumLikeColumn(string columnName, DataTable table)
+        {
+            if (!Regex.IsMatch(columnName, @"(status|state|type|kind|mode|category|function)$", RegexOptions.IgnoreCase))
+                return false;
+
+            var values = table.Rows.Cast<DataRow>()
+                .Select(row => row[columnName])
+                .Where(value => value != null && value != DBNull.Value)
+                .Take(20)
+                .ToList();
+
+            return values.Count > 0 && values.All(value =>
+                value is byte or short or int or long || int.TryParse(value.ToString(), out _));
         }
 
         private string BuildCompactSummary(DataTable table)

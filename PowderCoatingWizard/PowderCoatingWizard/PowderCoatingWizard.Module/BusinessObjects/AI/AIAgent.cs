@@ -98,6 +98,11 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
 
         float _temperature = 0.7f;
         int _maxTokens;
+        bool _ragRoutingPolicyEnabled = true;
+        string _contextSkipTerms;
+        string _databasePreferredTerms;
+        string _knowledgePreferredTerms;
+        string _hybridPreferredTerms;
 
         /// <summary>
         /// Sampling temperature for this agent (0.0 = deterministic, 1.0 = creative).
@@ -119,6 +124,54 @@ namespace PowderCoatingWizard.Module.BusinessObjects.AI
         {
             get => _maxTokens;
             set => SetPropertyValue(nameof(MaxTokens), ref _maxTokens, value);
+        }
+
+        // ── Runtime RAG routing policy ────────────────────────────────────────
+
+        /// <summary>
+        /// Enables this agent's runtime keyword routing policy before automatic RAG/classification.
+        /// </summary>
+        [ToolTip("When enabled, this agent can route context, database, knowledge, and hybrid requests by editable keyword lists before automatic RAG runs.")]
+        public bool RagRoutingPolicyEnabled
+        {
+            get => _ragRoutingPolicyEnabled;
+            set => SetPropertyValue(nameof(RagRoutingPolicyEnabled), ref _ragRoutingPolicyEnabled, value);
+        }
+
+        /// <summary>Terms that should route directly to current context or tool policy without automatic RAG.</summary>
+        [Size(SizeAttribute.Unlimited)]
+        [ToolTip("Newline, comma, or semicolon separated terms that should use context/tool policy first and skip automatic RAG.")]
+        public string ContextSkipTerms
+        {
+            get => _contextSkipTerms;
+            set => SetPropertyValue(nameof(ContextSkipTerms), ref _contextSkipTerms, value);
+        }
+
+        /// <summary>Terms that should prefer live database/domain tools and skip automatic RAG.</summary>
+        [Size(SizeAttribute.Unlimited)]
+        [ToolTip("Newline, comma, or semicolon separated terms that should prefer database/domain tools and skip automatic RAG.")]
+        public string DatabasePreferredTerms
+        {
+            get => _databasePreferredTerms;
+            set => SetPropertyValue(nameof(DatabasePreferredTerms), ref _databasePreferredTerms, value);
+        }
+
+        /// <summary>Terms that should prefer document, SOP, certificate, standard, or case-study retrieval.</summary>
+        [Size(SizeAttribute.Unlimited)]
+        [ToolTip("Newline, comma, or semicolon separated terms that should prefer document, SOP, certificate, standard, or case-study retrieval.")]
+        public string KnowledgePreferredTerms
+        {
+            get => _knowledgePreferredTerms;
+            set => SetPropertyValue(nameof(KnowledgePreferredTerms), ref _knowledgePreferredTerms, value);
+        }
+
+        /// <summary>Terms that should prefer a hybrid database plus knowledge investigation.</summary>
+        [Size(SizeAttribute.Unlimited)]
+        [ToolTip("Newline, comma, or semicolon separated terms that should prefer a hybrid database plus knowledge investigation.")]
+        public string HybridPreferredTerms
+        {
+            get => _hybridPreferredTerms;
+            set => SetPropertyValue(nameof(HybridPreferredTerms), ref _hybridPreferredTerms, value);
         }
 
         // ── Tool enablement ───────────────────────────────────────────────────

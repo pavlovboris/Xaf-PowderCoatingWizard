@@ -32,6 +32,7 @@ namespace PowderCoatingWizard.Win.Services
         private readonly RagSearchService _ragSearch;
         private readonly AIIntentRouterService _intentRouter;
         private readonly AISkillRouterService _skillRouter;
+        private readonly AutomaticRagRoutingPolicyService _routingPolicy;
         private readonly Guid? _agentOid;
         private readonly Action<string>? _onRagStatus;
 
@@ -39,6 +40,7 @@ namespace PowderCoatingWizard.Win.Services
             IChatClient inner,
             IChatClient plannerClient,
             RagSearchService ragSearch,
+            AutomaticRagRoutingPolicyService routingPolicy,
             Guid? agentOid,
             IEnumerable<AgentSkill>? allowedSkills = null,
             Action<string>? onRagStatus = null)
@@ -48,6 +50,7 @@ namespace PowderCoatingWizard.Win.Services
             _ragSearch = ragSearch;
             _intentRouter = new AIIntentRouterService(plannerClient);
             _skillRouter = new AISkillRouterService(allowedSkills);
+            _routingPolicy = routingPolicy;
             _agentOid = agentOid;
             _onRagStatus = onRagStatus;
         }
@@ -150,8 +153,29 @@ namespace PowderCoatingWizard.Win.Services
             var userText = string.Concat(lastUser.Contents.OfType<TextContent>().Select(t => t.Text));
             if (string.IsNullOrWhiteSpace(userText)) { AILogger.LogEvent("RAG", "User message is empty — skipping RAG"); return list; }
 
+            var routingDecision = _routingPolicy.Classify(userText);
+            if (routingDecision == AutomaticRagRoutingDecision.Context)
+            {
+                AILogger.LogEvent("RAG", "Skipping intent classification and automatic RAG for context/tool/capability request");
+                NotifyRagStatus("SKIP   context/tool request");
+                AddContextToolInstruction(list, lastUser);
+                return list;
+            }
+            if (routingDecision == AutomaticRagRoutingDecision.Database)
+            {
+                AILogger.LogEvent("RAG", "Skipping automatic RAG for database-preferred request");
+                NotifyRagStatus("SKIP   database preferred");
+                AddDatabaseToolInstruction(list, lastUser);
+                return list;
+            }
+
             NotifyRagStatus("START  Classify intent");
-            var intent = await _intentRouter.ClassifyAsync(userText, ct);
+            var intent = routingDecision switch
+            {
+                AutomaticRagRoutingDecision.Knowledge => AIQueryIntent.DocumentQuestion,
+                AutomaticRagRoutingDecision.Hybrid => AIQueryIntent.HybridInvestigation,
+                _ => await _intentRouter.ClassifyAsync(userText, ct)
+            };
             AILogger.LogEvent("INTENT", $"Classified as {intent}: {userText[..Math.Min(120, userText.Length)]}");
             NotifyRagStatus($"INTENT {intent}");
 
@@ -207,6 +231,29 @@ namespace PowderCoatingWizard.Win.Services
             return list;
         }
 
+        private static void AddContextToolInstruction(List<ChatMessage> messages, ChatMessage lastUser)
+        {
+            const string instruction =
+                "The user's request is about the current application context, selected object, active screen, or available tools. " +
+                "Do not use document retrieval or database analysis first. " +
+                "Call get_current_context for current/selected/context requests. " +
+                "Call get_tool_policy for tool/capability requests.";
+
+            int insertAt = messages.LastIndexOf(lastUser);
+            messages.Insert(insertAt, new ChatMessage(ChatRole.System, instruction));
+        }
+
+        private static void AddDatabaseToolInstruction(List<ChatMessage> messages, ChatMessage lastUser)
+        {
+            const string instruction =
+                "The user's request matches this agent's database-preferred routing terms. " +
+                "Do not use document retrieval first. Use current context, domain tools, get_database_insight, query_entity, or get_record_context as appropriate. " +
+                "Only produce tabular analysis if the user explicitly requested tables or lists.";
+
+            int insertAt = messages.LastIndexOf(lastUser);
+            messages.Insert(insertAt, new ChatMessage(ChatRole.System, instruction));
+        }
+
         private void NotifyRagStatus(string message)
         {
             try { _onRagStatus?.Invoke(message); }
@@ -239,7 +286,7 @@ namespace PowderCoatingWizard.Win.Services
             var intentInstruction = intent switch
             {
                 AIQueryIntent.DatabaseQuestion =>
-                    "Intent: DatabaseQuestion. Prefer database/tool evidence over general knowledge, but keep the assistant domain-focused rather than query-focused. Use get_database_insight as the primary database evidence tool to gather facts for summaries, comparisons, counts, aggregates, trends, and analysis. If database evidence contains enum integer values that need decoding, call get_enum_mappings for the relevant entity/property. Do not expose generated SQL, raw records, or tabular output unless the user explicitly asks for a table, list, report, or record-level output. Use get_next_database_insight_page only when the user explicitly asks for more rows/next page or confirms that additional pages are needed. If required data is missing, say exactly what is missing. Do not invent measurements or limits.",
+                    "Intent: DatabaseQuestion. Prefer database/tool evidence over general knowledge, but keep the assistant domain-focused rather than query-focused. Use list_entities and describe_entity for XAF application-model discovery, entity relationships, properties, and enum/display semantics. Use query_entity only for small XAF ObjectSpace-level samples, display values, relationships, or application object semantics. Use get_database_insight for set-based database evidence: counts, aggregates, joins, broad filtering, trends, comparisons, time windows, summaries, and analysis. If database evidence contains enum integer values that need decoding, call get_enum_mappings for the relevant entity/property. Do not expose generated SQL, raw records, or tabular output unless the user explicitly asks for a table, list, report, or record-level output. Use get_next_database_insight_page only when the user explicitly asks for more rows/next page or confirms that additional pages are needed. If required data is missing, say exactly what is missing. Do not invent measurements or limits.",
                 AIQueryIntent.DocumentQuestion =>
                     "Intent: DocumentQuestion. Prefer uploaded documents, standards, certificates, SOPs, and retrieved knowledge-base excerpts. If document evidence is insufficient, say so. Do not invent certificate dates, limits, or compliance status.",
                 AIQueryIntent.CaseStudyQuestion =>
@@ -255,6 +302,12 @@ namespace PowderCoatingWizard.Win.Services
                 "Base the answer on explicit evidence from database tools, retrieved documents, or approved case studies. " +
                 "Clearly distinguish observed data, retrieved evidence, inference, uncertainty, and recommended next actions. " +
                 "When using retrieved evidence, include its citation label. " +
+                "When the user refers to this, current, selected, here, active screen, active stage, or similar Bulgarian references such as tuk or tova, call get_current_context before choosing database or document tools. " +
+                "Use get_record_context when a specific business object key is known and XAF display values or relationships matter. " +
+                "If tool choice is unclear, call get_tool_policy. " +
+                "For database work, use XAF entity tools for application-model discovery and small object samples, and use get_database_insight for set-based SQL evidence such as counts, aggregates, joins, broad filtering, trends, comparisons, and summaries. " +
+                "Use search_knowledge for targeted document, standard, SOP, certificate, vector-store, or approved case-study evidence, especially after database facts clarify the issue. " +
+                "Use investigate_process_issue for coating defects, bath chemistry issues, abnormal measurements, or production-quality investigations that need current bath data, threshold alerts, and trends together. " +
                 "Use database evidence internally to complete the user's task; do not expose generated SQL, raw records, or tabular analysis unless the user explicitly asks for a table, list, report, export, or record-level output. " +
                 "Use get_enum_mappings only on demand when integer enum values from database evidence need human-readable names. " +
                 "Call additional database pages only in exceptional cases when the user explicitly asks for more rows or confirms that more pages are needed. " +

@@ -51,6 +51,9 @@ namespace PowderCoatingWizard.Module.Services.AI
                 if (identityColumns.Count > 0)
                     sb.AppendLine($"Identity: {string.Join(", ", identityColumns)}");
 
+                if (HasXpoSoftDeleteColumn(table))
+                    sb.AppendLine("XPO soft delete: exclude deleted records with GCRecord IS NULL.");
+
                 sb.AppendLine("Columns:");
                 foreach (var column in table.Columns.OrderBy(c => c.Ordinal))
                 {
@@ -94,6 +97,7 @@ namespace PowderCoatingWizard.Module.Services.AI
                 sb.AppendLine("Allowed SQL Server schema for internal database reasoning:");
                 sb.AppendLine("Only generate SELECT statements against the tables and columns listed below.");
                 sb.AppendLine("Use LIKE for text search unless exact matching is clearly required.");
+                sb.AppendLine("For tables with XPO soft delete, always exclude deleted records with GCRecord IS NULL.");
                 sb.AppendLine();
 
                 foreach (var table in schema.Values.OrderBy(t => t.SchemaName).ThenBy(t => t.TableName))
@@ -106,6 +110,9 @@ namespace PowderCoatingWizard.Module.Services.AI
                         .OrderBy(c => c.Ordinal)
                         .Select(FormatColumnForSummary);
                     sb.AppendLine($"Columns: {string.Join(", ", columns)}");
+
+                    if (HasXpoSoftDeleteColumn(table))
+                        sb.AppendLine("XPO soft delete: add GCRecord IS NULL for this table.");
 
                     if (table.ForeignKeys.Count > 0)
                     {
@@ -349,6 +356,9 @@ INNER JOIN sys.columns rc ON rc.object_id = rt.object_id AND rc.column_id = fkc.
             var desc = string.IsNullOrWhiteSpace(column.Description) ? string.Empty : $" ({column.Description})";
             return $"{column.Name} {column.DataType}{flagText}{desc}";
         }
+
+        private static bool HasXpoSoftDeleteColumn(SqlTableSchema table) =>
+            table.Columns.Any(c => c.Name.Equals("GCRecord", StringComparison.OrdinalIgnoreCase));
 
         private sealed class SqlTableSchema
         {

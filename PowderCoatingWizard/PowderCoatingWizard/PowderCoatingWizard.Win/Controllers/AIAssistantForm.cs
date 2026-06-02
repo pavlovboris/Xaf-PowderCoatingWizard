@@ -30,6 +30,7 @@ namespace PowderCoatingWizard.Win.Controllers
         private readonly AIAgent? _agent;
         private readonly Guid? _agentOid;
         private readonly string? _connectionString;
+        private readonly CurrentXafContextSnapshot _contextSnapshot;
 
         // RagChatClient wraps the real IChatClient and injects RAG context before every call.
         private readonly RagChatClient? _ragClient;
@@ -65,13 +66,15 @@ namespace PowderCoatingWizard.Win.Controllers
             LineStage? stage,
             AIAgent? agent = null,
             AIChatSession? session = null,
-            string? connectionString = null)
+            string? connectionString = null,
+            CurrentXafContextSnapshot? contextSnapshot = null)
         {
             _os = os;
             _osFactory = osFactory;
             _stage = stage;
             _chatClient = chatClient;
             _connectionString = connectionString;
+            _contextSnapshot = contextSnapshot ?? CurrentXafContextSnapshot.Empty;
 
             // Store only the Oid
             // OnChatInitialized runs. We reload the agent from our own _os below.
@@ -107,6 +110,11 @@ namespace PowderCoatingWizard.Win.Controllers
 
                 // Build the tool list respecting per-agent enablement
                 var toolList = new List<Microsoft.Extensions.AI.AITool>();
+                var schema = new SchemaDiscoveryService();
+                var currentContextService = new CurrentContextToolService(_stage, _agent, schema, dbQueryEnabled, ragAvailable: true, _contextSnapshot);
+                var toolPolicyContextService = new ToolPolicyContextService(_agent, dbQueryEnabled, ragAvailable: true);
+                toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(currentContextService.GetCurrentContext, "get_current_context"));
+                toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(toolPolicyContextService.GetToolPolicy, "get_tool_policy"));
 
                 if (IsTool(AgentTool.BathData))
                     toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(new BathDataToolService(_os).GetBathData));
@@ -117,17 +125,34 @@ namespace PowderCoatingWizard.Win.Controllers
                 if (IsTool(AgentTool.ThresholdAlert))
                     toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(new ThresholdAlertToolService(_os).GetThresholdAlerts));
 
+                if (IsTool(AgentTool.BathData) && IsTool(AgentTool.Trend) && IsTool(AgentTool.ThresholdAlert))
+                {
+                    var processInvestigationService = new ProcessInvestigationToolService(
+                        new BathDataToolService(_os),
+                        new ThresholdAlertToolService(_os),
+                        new MeasurementTrendToolService(_os));
+                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(processInvestigationService.InvestigateProcessIssue, "investigate_process_issue"));
+                }
+
                 if (dbQueryEnabled && IsTool(AgentTool.DbQuery))
                 {
-                    var schema = new SchemaDiscoveryService();
                     var sqlSchema = new SqlServerSchemaProvider(_connectionString, schema.Schema.Entities.SelectMany(e => new[] { e.Name, e.ClrType.FullName ?? e.Name, e.TableName }));
                     var sqlExecutor = new SafeSqlExecutor(_connectionString);
+                    var ragSearch = new RagSearchService(osFactory, new EmbeddingService(embeddingGenerator));
+                    var xafQueryService = new DatabaseQueryToolService(_os, schema, dbMaxRecords);
+                    var recordContextService = new RecordContextToolService(_os, schema);
                     var enumLookupService = new EnumLookupToolService(schema);
+                    var knowledgeSearchService = new KnowledgeSearchToolService(ragSearch, chatClient, _agentOid);
                     var dbChatService = new DatabaseChatInsightService(chatClient, sqlSchema, sqlExecutor, dbMaxRecords);
+                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(xafQueryService.ListEntities, "list_entities"));
+                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(xafQueryService.DescribeEntity, "describe_entity"));
+                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(xafQueryService.QueryEntity, "query_entity"));
+                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(recordContextService.GetRecordContext, "get_record_context"));
                     toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(dbChatService.GetDatabaseInsight, "get_database_insight"));
                     toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(dbChatService.GetNextDatabaseInsightPage, "get_next_database_insight_page"));
                     toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(enumLookupService.GetEnumMappings, "get_enum_mappings"));
-                    AILogger.LogEvent("DBTOOLS", "Legacy database query tools archived: list_entities, describe_entity, and query_entity are not registered.");
+                    toolList.Add(Microsoft.Extensions.AI.AIFunctionFactory.Create(knowledgeSearchService.SearchKnowledge, "search_knowledge"));
+                    AILogger.LogEvent("DBTOOLS", "Registered XAF entity tools for application-model discovery/samples and DBChat tools for set-based evidence.");
                 }
 
                 // Per-agent model parameters (temperature excluded — not injected to stay compatible with all models)
@@ -160,6 +185,7 @@ namespace PowderCoatingWizard.Win.Controllers
                 _ragClient = new RagChatClient(pipeline,
                     chatClient,   // raw provider client — for query planning only (no tools injected)
                     new RagSearchService(osFactory, new EmbeddingService(embeddingGenerator)),
+                    new AutomaticRagRoutingPolicyService(osFactory, _agentOid),
                     _agentOid,
                     allowedSkills,
                     AddRagHistoryEntry);

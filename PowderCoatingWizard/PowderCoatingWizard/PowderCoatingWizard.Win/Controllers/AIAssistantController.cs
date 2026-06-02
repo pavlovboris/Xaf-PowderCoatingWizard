@@ -50,6 +50,7 @@ namespace PowderCoatingWizard.Win.Controllers
                 ListView lv   => lv.CurrentObject as LineStage,
                 _             => null
             };
+            var contextSnapshot = CaptureCurrentContext(e);
 
             var osFactory = sp?.GetService<IObjectSpaceFactory>();
 
@@ -94,8 +95,60 @@ namespace PowderCoatingWizard.Win.Controllers
             var sqlConnectionString = sp?.GetService<IConnectionStringProvider>()?.GetConnectionString()
                 ?? ConfigurationManager.ConnectionStrings["ConnectionString"]?.ConnectionString
                 ?? Application.ConnectionString;
-            var form = new AIAssistantForm(chatClient, embGen, os, osFactory, currentStage, selectedAgent, selectedSession, sqlConnectionString);
+            var form = new AIAssistantForm(chatClient, embGen, os, osFactory, currentStage, selectedAgent, selectedSession, sqlConnectionString, contextSnapshot);
             form.Show();
+        }
+
+        private CurrentXafContextSnapshot CaptureCurrentContext(SimpleActionExecuteEventArgs e)
+        {
+            var objectType = View.ObjectTypeInfo?.Type;
+            var selected = e.SelectedObjects
+                .Cast<object>()
+                .Where(o => o != null)
+                .Take(10)
+                .Select(CreateObjectSnapshot)
+                .Where(o => o != null)
+                .Cast<CurrentXafObjectSnapshot>()
+                .ToList();
+
+            object? currentObject = View switch
+            {
+                DetailView dv => dv.CurrentObject,
+                ListView lv => lv.CurrentObject,
+                _ => null
+            };
+
+            return new CurrentXafContextSnapshot
+            {
+                ViewId = View.Id ?? string.Empty,
+                ViewType = View.GetType().Name,
+                ObjectTypeName = objectType?.Name ?? string.Empty,
+                ObjectTypeFullName = objectType?.FullName ?? string.Empty,
+                CurrentObject = CreateObjectSnapshot(currentObject),
+                SelectedObjects = selected,
+                SelectedObjectCount = e.SelectedObjects.Count,
+                IsListView = View is ListView,
+                IsDetailView = View is DetailView
+            };
+        }
+
+        private CurrentXafObjectSnapshot? CreateObjectSnapshot(object? obj)
+        {
+            if (obj == null)
+                return null;
+
+            var type = obj.GetType();
+            object? key = null;
+            try { key = View.ObjectSpace.GetKeyValue(obj); }
+            catch { /* best effort context snapshot */ }
+
+            return new CurrentXafObjectSnapshot
+            {
+                EntityName = type.Name,
+                EntityFullName = type.FullName ?? type.Name,
+                Key = key?.ToString() ?? string.Empty,
+                DisplayText = obj.ToString() ?? type.Name
+            };
         }
     }
 }

@@ -1,6 +1,8 @@
 using DevExpress.ExpressApp;
 using DevExpress.ExpressApp.Editors;
 using DevExpress.ExpressApp.Model;
+using DevExpress.AIIntegration.WinForms;
+using DevExpress.Utils.Behaviors;
 using DevExpress.XtraEditors;
 using DevExpress.XtraEditors.Repository;
 using DevExpress.XtraGrid;
@@ -59,6 +61,7 @@ namespace PowderCoatingWizard.Win.Editors
         private XafApplication                _app;
         private GridControl                   _grid;
         private AdvBandedGridView             _gridView;
+        private BehaviorManager               _aiCriteriaBehaviorManager;
         private List<ColumnMeta>              _columns  = [];
         private bool                          _savingLayout;
 
@@ -190,6 +193,17 @@ namespace PowderCoatingWizard.Win.Editors
             };
             _grid.MainView = _gridView;
             _gridView.OptionsMenu.ShowConditionalFormattingItem = true;
+            _gridView.OptionsFilter.AllowFilterEditor = true;
+
+            _aiCriteriaBehaviorManager = new BehaviorManager();
+            _aiCriteriaBehaviorManager.Attach<PromptToExpressionBehavior>(_gridView, behavior =>
+            {
+                behavior.Properties.RetryAttemptCount = 3;
+                behavior.Properties.Temperature = 1.0f;
+                behavior.Properties.PromptAugmentation =
+                    "Generate only valid DevExpress filter criteria for the current grid columns. " +
+                    "Do not include explanations or markdown.";
+            });
 
             _gridView.CustomDrawCell         += OnCustomDrawCell;
             _gridView.CustomDrawBandHeader   += OnCustomDrawBandHeader;
@@ -221,6 +235,8 @@ namespace PowderCoatingWizard.Win.Editors
         {
             if (disposing && _os != null)
                 _os.Committed -= OnObjectSpaceCommitted;
+            if (disposing)
+                _aiCriteriaBehaviorManager?.Dispose();
             base.Dispose(disposing);
         }
 
